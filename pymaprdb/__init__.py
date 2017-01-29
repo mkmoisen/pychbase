@@ -1,5 +1,7 @@
 from pymaprdb import _connection, _table
 
+# TODO It would be cool to see if ld_library_path is set correctly?
+
 class Connection(object):
     def __init__(self, cldbs):
         self.cldbs = cldbs
