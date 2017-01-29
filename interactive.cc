@@ -5,7 +5,7 @@
 #include <string.h>
 #include <vector>
 
-//#if defined(_WIN32) || defined(_WIN64)
+
 #if defined( WIN64 ) || defined( _WIN64 ) || defined( __WIN64__ ) || defined(_WIN32)
 #define __WINDOWS__
 #endif
@@ -18,7 +18,7 @@
     }                                \
   } while (0);
 
-char cldbs[1024] = {0};
+const char *cldbs = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222";
 const char *tableName = "/app/SubscriptionBillingPlatform/testInteractive";
 const char *family1 = "Id";
 const char *col1_1  = "I";
@@ -59,7 +59,6 @@ void read_result(hb_result_t result)
   size_t cellCount = 0;
   hb_result_get_cell_count(result, &cellCount);
 
-  // Getting all cells
   for (size_t i = 0; i < cellCount; ++i) {
     const hb_cell_t *cell;
     hb_result_get_cell_at(result, i, &cell);
@@ -77,7 +76,7 @@ bool clientDestroyed;
 
 void cl_dsc_cb(int32_t err, hb_client_t client, void *extra)
 {
-//  printf("  -> Client disconnection callback called %p\n", extra);
+
   clientDestroyed = true;
 }
 
@@ -365,7 +364,7 @@ int test_scan(const char *user, const char *filter, uint32_t filterLen)
 
 void get_send_cb(int32_t err, hb_client_t client, hb_get_t get, hb_result_t result, void *extra)
 {
-//  printf("  get_send_cb: err=%d\n", err);
+
   if (result) {
     const byte_t *key;
     size_t keyLen;
@@ -415,10 +414,6 @@ int test_get(const char *user)
   err = hb_get_set_table(get, tableName, strlen(tableName));
   CHECK_RC_RETURN(err);
 
-//  err = hb_get_set_timestamp(get, get_timestamp() - 1);
-
-//  err = hb_get_set_num_versions(get, 2);
-//  printf("get_set_num_versions: %d\n", err);
 
   count = 0;
   err = hb_get_send(client, get, get_send_cb, rowBuf);
@@ -431,6 +426,11 @@ int test_get(const char *user)
   sleep(1);
   hb_connection_destroy(conn);
 }
+
+int main() {
+  test_get(NULL);
+}
+
 
 int main() {
   int err = 0;
@@ -531,3 +531,4 @@ int main() {
 
   return 0;
 }
+
