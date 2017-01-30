@@ -329,6 +329,7 @@ struct RowBuffer {
     }
 
     ~RowBuffer() {
+        //printf("RowBuffer Destructor\n");
         while (allocedBufs.size() > 0) {
             char *buf = allocedBufs.back();
             allocedBufs.pop_back();
@@ -596,6 +597,7 @@ struct CallBackBuffer {
         batch_call_back_buffer = bcbb;
     }
     ~CallBackBuffer() {
+        //printf("CallBackBuffer Destructor\n");
         delete rowBuf;
     }
 };
@@ -626,16 +628,14 @@ struct BatchCallBackBuffer {
     }
     ~BatchCallBackBuffer() {
         //delete call_back_buffers;
-        printf("in destructor\n");
+        //printf("BatchCallBackBuffer destructor\n");
 
         while (call_back_buffers.size() > 0) {
-            printf("before .back\n");
             CallBackBuffer *buf = call_back_buffers.back();
             call_back_buffers.pop_back();
-            printf("before delete\n");
             delete buf; // In row buffer destructor, its delete [] buf ...
-            printf("after delete\n");
         }
+        printf("After BatchCallBack desructors\n");
 
     }
 
@@ -902,7 +902,11 @@ static PyObject *Table_row(Table *self, PyObject *args) {
 
 
 void client_flush_callback(int32_t err, hb_client_t client, void *ctx) {
-    printf("Client flush callback invoked: %d\n", err);
+    //printf("Client flush callback invoked: %d\n", err);
+    CHECK_RC_RETURN(err);
+    if (err != 0) {
+
+    }
 }
 
 static void *split(char *fq, char* arr[]) {
@@ -992,7 +996,7 @@ void put_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result
         pthread_mutex_unlock(&call_back_buffer->table->mutex);
     }
     hb_mutation_destroy(mutation);
-    hb_result_destroy(result);
+    //hb_result_destroy(result);
 
 
     //hb_mutation_destroy(mutation);
@@ -1078,7 +1082,7 @@ connection.open()
 
 table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
 table.put('snoop', {'Name:a':'a','Name:foo':'bar'})
-for i in range(10000):
+for i in range(1000000):
     table.put('snoop', {'Name:a':'a','Name:foo':'bar'})
 
 lol()
@@ -1092,12 +1096,14 @@ static int make_put(Table *self, RowBuffer *rowBuf, const char *row_key, PyObjec
     CHECK_RC_RETURN(err);
     if (err != 0) {
         PyErr_SetString(PyExc_ValueError, "Could not create put");
-        return -1;
+        return err;
     }
 
     PyObject *fq, *value;
     Py_ssize_t pos = 0;
     hb_cell_t *cell;
+    // https://docs.python.org/2/c-api/dict.html?highlight=pydict_next#c.PyDict_Next
+    // This says PyDict_Next borrows references for key and value...
     while (PyDict_Next(dict, &pos, &fq, &value)) {
         char *arr[2];
         split(PyString_AsString(fq), arr);
@@ -1135,7 +1141,7 @@ static int make_put(Table *self, RowBuffer *rowBuf, const char *row_key, PyObjec
     CHECK_RC_RETURN(err);
     if (err != 0) {
         PyErr_SetString(PyExc_ValueError, "Could not add cell to put");
-        return -1;
+        return err;
     }
     //printf("RC for muttaion set table was %i\n", err);
 
@@ -1159,8 +1165,8 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     err = make_put(self, rowBuf, row_key, dict, &hb_put);
     CHECK_RC_RETURN(err);
     if (err != 0) {
-        // TODO test this and see what happens
-        //PyErr_SetString(PyExc_ValueError, "Could not create put");
+        // This would just override the error message set in make_put
+        // PyErr_SetString(PyExc_ValueError, "Could not create put oh noo");
         return NULL;
     }
 
@@ -1174,7 +1180,7 @@ static PyObject *Table_put(Table *self, PyObject *args) {
 
     //self->count = 0;
     hb_client_flush(self->connection->client, client_flush_callback, NULL);
-    printf("Waiting for all callbacks to return ...\n");
+    //printf("Waiting for all callbacks to return ...\n");
 
     //uint64_t locCount;
     //do {
@@ -1212,28 +1218,36 @@ static PyObject *Table_put(Table *self, PyObject *args) {
 }
 
 void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t numResults, void *extra) {
-    printf("In sn_cb\n");
+    //printf("In sn_cb\n");
     Table *table = (Table *) extra;
     if (numResults > 0) {
-        printf("bnefore rowbuff = extra\n");
+        //printf("bnefore rowbuff = extra\n");
 
         PyObject *dict;
-        printf("befoer loop\n");
+        //printf("befoer loop\n");
         for (uint32_t r = 0; r < numResults; ++r) {
-            printf("looping\n");
+            //printf("looping\n");
             const byte_t *key;
             size_t keyLen;
             hb_result_get_key(results[r], &key, &keyLen);
-            printf("Row: %s\t", (char *)key);
+            //printf("Row: %s\t", (char *)key);
+            // Do I need a null check?
             dict = PyDict_New();
-            printf("before reading result into dict\n");
+            //printf("dicts ref count %i\n", dict->ob_refcnt);
+            //printf("before reading result into dict\n");
             read_result(results[r], dict);
-            printf("before append\n");
+            //printf("dicts ref count after read_results %i\n", dict->ob_refcnt);
+            //printf("before append\n");
             // Do I need to INCREF the result of Py_BuildValue?
-            // Should I do that ! with the type?
+            // Should I do that ! with the type? Does that make it faster or slower lol
             PyList_Append(table->rets, Py_BuildValue("sO",(char *)key, dict));
-            printf("\n");
-            printf("before destroy\n");
+            //printf("dicts ref count after append %i\n", dict->ob_refcnt);
+
+            Py_DECREF(dict);
+             printf("dicts ref count after decref %i", dict->ob_refcnt);
+
+            //printf("\n");
+            //printf("before destroy\n");
             hb_result_destroy(results[r]);
         }
 
@@ -1254,8 +1268,7 @@ connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdn
 connection.open()
 
 table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
-table.row('row-000')
-table.scan()
+table.scan('row')
 */
 
 static PyObject *Table_scan(Table *self, PyObject *args) {
@@ -1319,37 +1332,47 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
 
 void delete_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result_t result, void *extra) {
     // Not sure if I can just use the put_callback or if I should change them
-    if (err != 0) {
-        printf("PUT CALLBACK called err = %d\n", err);
-    }
 
     //Table *table = (Table *) extra;
     CallBackBuffer *call_back_buffer = (CallBackBuffer *) extra;
+    call_back_buffer->err = err;
+    if (err != 0) {
+        printf("MapR API Failed on Delete Callback %i\n", err);
+        call_back_buffer->count = 1;
+        if (call_back_buffer->batch_call_back_buffer) {
+            pthread_mutex_lock(&call_back_buffer->table->mutex);
+            call_back_buffer->batch_call_back_buffer->count++;
+            call_back_buffer->batch_call_back_buffer->errors++;
+            pthread_mutex_unlock(&call_back_buffer->table->mutex);
+        }
 
-
-    hb_mutation_destroy(mutation);
-    pthread_mutex_lock(&call_back_buffer->table->mutex);
-    //count ++;
-    call_back_buffer->table->count++;
-    pthread_mutex_unlock(&call_back_buffer->table->mutex);
-    if (result) {
-        const byte_t *key;
-        size_t keyLen;
-        hb_result_get_key(result, &key, &keyLen);
-        printf("Row: %s\t", (char *)key);
-        read_result(result, NULL);
-        printf("\n");
-        hb_result_destroy(result);
+        return;
     }
 
-    delete call_back_buffer;
     /*
-    // Ya this is important to do for puts lol
-    if (extra) {
-        RowBuffer *rowBuf = (RowBuffer *)extra;
-        delete rowBuf;
+    // It looks like result is always NULL for delete?
+    if (!result) {
+        printf("result is null!\n");
+        call_back_buffer->err = 12; // OOM
+        call_back_buffer->count = 1;
+        if (call_back_buffer->batch_call_back_buffer) {
+            pthread_mutex_lock(&call_back_buffer->table->mutex);
+            call_back_buffer->batch_call_back_buffer->count++;
+            call_back_buffer->batch_call_back_buffer->errors++;
+            pthread_mutex_unlock(&call_back_buffer->table->mutex);
+        }
     }
     */
+
+
+    call_back_buffer->count = 1;
+    if (call_back_buffer->batch_call_back_buffer) {
+        pthread_mutex_lock(&call_back_buffer->table->mutex);
+        call_back_buffer->batch_call_back_buffer->count++;
+        call_back_buffer->batch_call_back_buffer->errors++;
+        pthread_mutex_unlock(&call_back_buffer->table->mutex);
+    }
+
 }
 
 /*
@@ -1367,9 +1390,17 @@ static int make_delete(Table *self, char *row_key, hb_delete_t *hb_delete) {
 
     err = hb_delete_create((byte_t *)row_key, strlen(row_key) + 1, hb_delete);
     CHECK_RC_RETURN(err);
+    if (err != 0) {
+        PyErr_SetString(PyExc_ValueError, "Could not create delete");
+        return err;
+    }
 
     err = hb_mutation_set_table((hb_mutation_t)*hb_delete, self->table_name, strlen(self->table_name));
     CHECK_RC_RETURN(err);
+    if (err != 0) {
+        PyErr_SetString(PyExc_ValueError, "Could not set table on delete");
+        return err;
+    }
 
     return err;
 }
@@ -1384,21 +1415,15 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
     }
 
     int err = 0;
-    /*
-    hb_delete_t hb_delete;
-
-    err = hb_delete_create((byte_t *)row_key, strlen(row_key) + 1, &hb_delete);
-    CHECK_RC_RETURN(err);
-
-    err = hb_mutation_set_table((hb_mutation_t)hb_delete, self->table_name, strlen(self->table_name));
-    CHECK_RC_RETURN(err);
-    printf("RC for muttaion set table was %i\n", err);
-    */
 
     hb_delete_t hb_delete;
     err = make_delete(self, row_key, &hb_delete);
-
     CHECK_RC_RETURN(err);
+    if (err != 0) {
+        // Try this and see what happens
+        //PyErr_SetString(PyExc_ValueError, "Could not create delete");
+        return NULL;
+    }
     printf("RC for muttaion set table was %i\n", err);
 
     RowBuffer *rowBuf = new RowBuffer();
@@ -1407,15 +1432,19 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
 
     err = hb_mutation_send(self->connection->client, (hb_mutation_t)hb_delete, delete_callback, call_back_buffer);
     CHECK_RC_RETURN(err);
+    if (err != 0) {
+        PyErr_SetString(PyExc_ValueError, "Could not send delete");
+        return NULL;
+    }
     printf("RC for mutation send was %i\n", err);
 
-    self->count = 0;
+    // Todo do I need to error check this?
     hb_client_flush(self->connection->client, client_flush_callback, NULL);
     printf("Waiting for all callbacks to return ...\n");
 
     int wait = 0;
 
-    while (self->count != 1) {
+    while (call_back_buffer->count != 1) {
         sleep(0.1);
         wait++;
         //printf("wait is %i\n",wait);
@@ -1437,7 +1466,7 @@ connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdn
 connection.open()
 
 table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
-table.batch([('put', 'hello{}'.format(i), {'Name:bar':'bar{}'.format(i)}) for i in range(1000000)])
+table.batch([('put', 'hello{}'.format(i), {'Name:bar':'bar{}'.format(i)}) for i in range(100000)])
 #table.scan()
 
 
@@ -1446,9 +1475,13 @@ connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdn
 connection.open()
 
 table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
+table.batch([('delete', 'hello{}'.format(i), {'Name:bar':'bar{}'.format(i)}) for i in range(100000)])
+
+
+
 table.batch([], 10000)
 table.batch([None for _ in range(1000000)], 10)
-table.batch([('delete', 'hello{}'.format(i), {'Name:bar':'bar{}'.format(i)}) for i in range(1000000)], 10)
+table.batch([('delete', 'hello{}'.format(i)) for i in range(100000)])
 
 */
 
@@ -1493,10 +1526,13 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
     BatchCallBackBuffer *batch_call_back_buffer = new BatchCallBackBuffer(number_of_actions);
     for (i = 0; i < number_of_actions; i++) {
         tuple = PyList_GetItem(actions, i);
+        //printf("tuples ref count is %i\n", tuple->ob_refcnt);
         //printf("got tuple\n");
         char *mutation_type = PyString_AsString(PyTuple_GetItem(tuple, 0));
+        //printf("tuples ref count after pystring_asstring %i\n", tuple->ob_refcnt);
         //printf("got mutation_type\n");
         //printf("mutation type is %s\n", mutation_type);
+        // TODO CHECK LENGTHS OF PUT VS GET FOR ERRORS
         if (strcmp(mutation_type, "put") == 0) {
             //printf("Its a put");
             RowBuffer *rowBuf = new RowBuffer();
@@ -1505,12 +1541,17 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
             batch_call_back_buffer->call_back_buffers.push_back(call_back_buffer);
             //In particular, all functions whose function it is to create a new object, such as PyInt_FromLong() and Py_BuildValue(), pass ownership to the receiver.
             char *row_key = PyString_AsString(PyTuple_GetItem(tuple, 1));
+            //printf("tuples ref count after pystringasstring 1 is %i\n", tuple->ob_refcnt);
             PyObject *dict = PyTuple_GetItem(tuple, 2);
+            //printf("tuples ref count after pytuplegetitem 2 %i\n", tuple->ob_refcnt);
+            //printf("dict ref count is %i\n", dict->ob_refcnt);
             // do I need to increment dict?
             hb_put_t hb_put;
             err = make_put(self, rowBuf, row_key, dict, &hb_put);
+            //printf("dict ref count after make put %i\n", dict->ob_refcnt);
             CHECK_RC_RETURN(err)
             err = hb_mutation_send(self->connection->client, (hb_mutation_t)hb_put, put_callback, call_back_buffer);
+            //printf("dict ref count after send %i\n", dict->ob_refcnt);
             // TODO ADD the hb_put to the call back buffer and free it!
             CHECK_RC_RETURN(err);
             //printf("hb mutation send was %i\n",err);
