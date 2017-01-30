@@ -334,6 +334,8 @@ struct RowBuffer {
             char *buf = allocedBufs.back();
             allocedBufs.pop_back();
             delete [] buf;
+            // It looks like these do the same thing? What is the difference between free and delete [] here?
+            //free(buf);
         }
     }
 
@@ -486,23 +488,188 @@ static PyObject *Connection_is_open(Connection *self) {
     return Py_False;
 }
 
+
 /*
+import spam
+connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+connection.open()
+connection.create_table("/app/SubscriptionBillingPlatform/testpymaprdb21", {'f1': {}})
+
+
+connection.create_table_wtf("/app/SubscriptionBillingPlatform/testpymaprdb20", {'f1': 'a'})
+
+
+
+
+connection.create_table_wtf("/app/SubscriptionBillingPlatform/testpymaprdb11", ['hello'])
+
+
+*/
+
+
+
 static PyObject *Connection_create_table(Connection *self, PyObject *args) {
+    int err;
     char *table_name;
     PyObject *dict;
-    if (!PyArg_ParseTuple(args, "sO!", &table_name, PyDict_Type, &dict)) {
+    if (!PyArg_ParseTuple(args, "sO!", &table_name, &PyDict_Type, &dict)) {
+        printf("noob in parse tuple\n");
         return NULL;
     }
-    int number_of_families;
-    hb_columndesc families[];
-    int err = hb_admin_table_create(self->admin, NULL, table_name, families, num_families);
+    if (!self->is_open) {
+        Connection_open(self);
+    }
+
+    err = hb_admin_table_exists(self->admin, NULL, table_name);
+    if (err == 0) {
+        // I guess I have to return -1 nothing else to cause the correct failure
+        PyErr_SetString(PyExc_ValueError, "Table already exists\n");
+        //return NULL; // return err;
+        return NULL;
+    }
+
+    PyObject *column_family_name, *column_family_attributes;
+    Py_ssize_t i = 0;
+    //int i = 0;
+
+    int number_of_families = PyDict_Size(dict);
+    if (number_of_families < 1) {
+        PyErr_SetString(PyExc_ValueError, "Need at least one column family");
+        return NULL;
+    }
+    hb_columndesc families[number_of_families];
+
+    int counter = 0;
+
+    while (PyDict_Next(dict, &i, &column_family_name, &column_family_attributes)) {
+
+
+        char *column_family_name_char = PyString_AsString(column_family_name);
+        if (!column_family_name_char) {
+            PyErr_SetString(PyExc_ValueError, "Out of memmory");
+            return NULL;
+        }
+
+        err = hb_coldesc_create((byte_t *)column_family_name_char, strlen(column_family_name_char) + 1, &families[counter]);
+        if (err != 0) {
+            PyErr_SetString(PyExc_ValueError, "Failed to create coldesc");
+            return NULL;
+        }
+        //printf("In loop name is %s\n", (char *)columndesc.family);
+
+        //families[i] = columndesc;
+
+
+        PyObject *key, *value;
+        Py_ssize_t o;
+        while (PyDict_Next(dict, &o, &key, &value)) {
+            char *key_char = PyString_AsString(key);
+            if (!key_char) {
+                PyErr_SetString(PyExc_ValueError, "Out of memmory");
+                return NULL;
+            }
+            if (strcmp(key_char, "max_versions")) {
+                int max_versions = PyInt_AsSsize_t(value);
+                // error check?
+                err = hb_coldesc_set_maxversions(&families[counter], max_versions);
+                if (err != 0) {
+                    PyErr_SetString(PyExc_ValueError, "Failed to add max version to column desc");
+                    return NULL;
+                }
+            } else if (strcmp(key_char, "min_versions")) {
+                int min_versions = PyInt_AsSsize_t(value);
+                err = hb_coldesc_set_minversions(&families[counter], min_versions);
+                if (err != 0) {
+                    PyErr_SetString(PyExc_ValueError, "Failed to add min version to column desc");
+                    return NULL;
+                }
+            } else if (strcmp(key_char, "time_to_live")) {
+                int time_to_live = PyInt_AsSsize_t(value);
+                err = hb_coldesc_set_ttl(&families[counter], time_to_live);
+                if (err != 0) {
+                    PyErr_SetString(PyExc_ValueError, "Failed to add time to live to column desc");
+                    return NULL;
+                }
+            } else if (strcmp(key_char, "in_memory")) {
+                int in_memory = PyInt_AsSsize_t(value);
+                err = hb_coldesc_set_inmemory(&families[counter], in_memory);
+                if (err != 0) {
+                    PyErr_SetString(PyExc_ValueError, "Failed to add in memory to column desc");
+                    return NULL;
+                }
+            } else {
+                PyErr_SetString(PyExc_ValueError, "Only max_versions, min_version, time_to_live, or in_memory permitted");
+                return NULL;
+            }
+
+        }
+
+        counter++;
+    }
+
+    //err = hb_admin_table_create(self->admin, NULL, table_name, families, number_of_families);
+    err = hb_admin_table_create(self->admin, NULL, table_name, families, number_of_families);
+    if (err != 0) {
+        PyErr_SetString(PyExc_ValueError, "Failed to admin table create");
+        return NULL;
+    }
+    Py_RETURN_NONE;
 }
+
+
+/*
+import spam
+connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+connection.open()
+for i in range(1,20):
+    try:
+        connection.delete_table("/app/SubscriptionBillingPlatform/testpymaprdb{}".format(i))
+    except ValueError:
+        pass
+
+
 */
+
+static PyObject *Connection_delete_table(Connection *self, PyObject *args) {
+    char *table_name;
+    char *name_space;
+    if (!PyArg_ParseTuple(args, "s|s", &table_name, &name_space)) {
+        return NULL;
+    }
+
+    if (!self->is_open) {
+        Connection_open(self);
+    }
+
+    int err;
+
+    err = hb_admin_table_exists(self->admin, NULL, table_name);
+    CHECK_RC_RETURN(err);
+
+    if (err != 0) {
+        // I guess I have to return -1 nothing else to cause the correct failure
+        PyErr_SetString(PyExc_ValueError, "Table does not exist\n");
+        //return NULL; // return err;
+        return NULL;
+    }
+
+    err = hb_admin_table_delete(self->admin, name_space, table_name);
+
+    if (err != 0) {
+        PyErr_SetString(PyExc_ValueError, "Failed to admin delete create");
+        return NULL;
+    }
+
+    Py_RETURN_NONE;
+}
+
 
 static PyMethodDef Connection_methods[] = {
     {"open", (PyCFunction) Connection_open, METH_NOARGS, "Opens the connection"},
     {"close", (PyCFunction) Connection_close, METH_NOARGS, "Closes the connection"},
     {"is_open", (PyCFunction) Connection_is_open, METH_NOARGS,"Checks if the connection is open"},
+    {"create_table", (PyCFunction) Connection_create_table, METH_VARARGS, "Creates an HBase table"},
+    {"delete_table", (PyCFunction) Connection_delete_table, METH_VARARGS, "Deletes an HBase table"},
     {NULL},
 };
 
@@ -634,7 +801,11 @@ struct BatchCallBackBuffer {
             CallBackBuffer *buf = call_back_buffers.back();
             call_back_buffers.pop_back();
             delete buf; // In row buffer destructor, its delete [] buf ...
+            // doesn't work
+            //free(buf);
         }
+        // doesn't work
+        //free(call_back_buffers);
         printf("After BatchCallBack desructors\n");
 
     }
@@ -671,14 +842,8 @@ static int Table_init(Table *self, PyObject *args, PyObject *kwargs) {
         Connection_open(connection);
     }
 
-    tmp = self->connection;
-    Py_INCREF(connection);
-    self->connection = connection;
-    Py_XDECREF(connection);
-
-    self->table_name = table_name;
-
-    int err = hb_admin_table_exists(self->connection->admin, NULL, self->table_name);
+    //int err = hb_admin_table_exists(self->connection->admin, NULL, self->table_name);
+    int err = hb_admin_table_exists(connection->admin, NULL, table_name);
     CHECK_RC_RETURN(err);
 
     if (err != 0) {
@@ -687,6 +852,15 @@ static int Table_init(Table *self, PyObject *args, PyObject *kwargs) {
         //return NULL; // return err;
         return -1;
     }
+
+    // Oddly, if I set self->connection before the above error chech/raise exception
+    // If I make a table() that fails because thet able doesn't exist
+    // The next time I touch connection I get a seg fault?
+    self->table_name = table_name;
+    tmp = self->connection;
+    Py_INCREF(connection);
+    self->connection = connection;
+    Py_XDECREF(connection);
 
     self->mutex = PTHREAD_MUTEX_INITIALIZER;
     self->count = 0;
@@ -1088,10 +1262,20 @@ for i in range(1000000):
 lol()
 */
 
+
+
 static int make_put(Table *self, RowBuffer *rowBuf, const char *row_key, PyObject *dict, hb_put_t *hb_put) {
     int err;
     //hb_put_t *hb_put = (hb_put_t *) malloc(sizeof(hb_put_t));
     //printf("Before hb_put_create\n");
+
+    int size = PyDict_Size(dict);
+    if (size < 1) {
+        // TODO for Batch puts do we not want to set the exception message here, but rather in the batch()?
+        PyErr_SetString(PyExc_ValueError, "Row contents are empty");
+        return -1;
+    }
+
     err = hb_put_create((byte_t *)row_key, strlen(row_key) + 1, hb_put);
     CHECK_RC_RETURN(err);
     if (err != 0) {
@@ -1102,10 +1286,12 @@ static int make_put(Table *self, RowBuffer *rowBuf, const char *row_key, PyObjec
     PyObject *fq, *value;
     Py_ssize_t pos = 0;
     hb_cell_t *cell;
+    char *arr[2];
     // https://docs.python.org/2/c-api/dict.html?highlight=pydict_next#c.PyDict_Next
     // This says PyDict_Next borrows references for key and value...
     while (PyDict_Next(dict, &pos, &fq, &value)) {
-        char *arr[2];
+        // Its weird if I loop batch with 100000, the ref count is 100002 for value??
+        //printf("value ref count is %i\n", value->ob_refcnt);
         split(PyString_AsString(fq), arr);
         //printf("family is %s\n", arr[0]);
         //printf("qualifier is %s\n", arr[1]);
@@ -1114,8 +1300,10 @@ static int make_put(Table *self, RowBuffer *rowBuf, const char *row_key, PyObjec
         char *qualifier = rowBuf->getBuffer(1024);
         char *v = rowBuf->getBuffer(1024);
 
+
         strcpy(family, arr[0]);
         strcpy(qualifier, arr[1]);
+        // delete [] arr;
         strcpy(v, PyString_AsString(value));
 
         //printf("family is %s\n", family);
@@ -1125,7 +1313,7 @@ static int make_put(Table *self, RowBuffer *rowBuf, const char *row_key, PyObjec
         //printf("creating dummy cell\n");
         create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family) + 1, qualifier, strlen(qualifier) + 1, v, strlen(v) + 1);
         //printf("put add cell\n");
-        err = hb_put_add_cell(*hb_put, cell);
+        err = hb_put_add_cell(*hb_put, cell);;
         CHECK_RC_RETURN(err);
         if (err != 0) {
             PyErr_SetString(PyExc_ValueError, "Could not add cell to put");
@@ -1134,6 +1322,7 @@ static int make_put(Table *self, RowBuffer *rowBuf, const char *row_key, PyObjec
         //printf("put add cell error %i\n", err);
         delete cell;
         //printf("RC for put add cell was %i\n", err);
+
     }
 
     //printf("hb_mutation set table\n");
@@ -1268,7 +1457,7 @@ connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdn
 connection.open()
 
 table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
-table.scan('row')
+table.scan('hello', 'hello100~')
 */
 
 static PyObject *Table_scan(Table *self, PyObject *args) {
@@ -1456,6 +1645,14 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
 
     }
 
+    err = call_back_buffer->err;
+    delete call_back_buffer;
+    CHECK_RC_RETURN(err);
+    if (err != 0) {
+        PyErr_SetString(PyExc_ValueError, "Error in delete callback");
+        return NULL;
+    }
+
     Py_RETURN_NONE;
 }
 
@@ -1489,17 +1686,23 @@ table.batch([('delete', 'hello{}'.format(i)) for i in range(100000)])
 static PyObject *Table_batch(Table *self, PyObject *args) {
 
     PyObject *actions;
-    int number_of_mutations;
+    //int number_of_mutations;
 
-    if (!PyArg_ParseTuple(args, "O!i", &PyList_Type, &actions, &number_of_mutations)) {
+    if (!PyArg_ParseTuple(args, "O!", &PyList_Type, &actions)) {
         return NULL;
     }
 
     //int number_of_mutations = 1000;
-    BatchCallBackBuffer *batch_cbb = new BatchCallBackBuffer(number_of_mutations);
+    int number_of_actions = PyList_Size(actions);
+    BatchCallBackBuffer *batch_cbb = new BatchCallBackBuffer(number_of_actions);
     int i;
-    for (i = 0; i < number_of_mutations; i++) {
-        CallBackBuffer *call_back_buffer = new CallBackBuffer(self, new RowBuffer(), batch_cbb);
+    PyObject *value;
+    for (i = 0; i < number_of_actions; i++) {
+        value = PyList_GetItem(actions, i);
+        RowBuffer *rowBuf = new RowBuffer();
+        char *rk = rowBuf->getBuffer(1024);
+        strcpy(rk, PyString_AsString(value));
+        CallBackBuffer *call_back_buffer = new CallBackBuffer(self, rowBuf, batch_cbb);
         call_back_buffer->count = i;
         batch_cbb->call_back_buffers.push_back(call_back_buffer);
     }
@@ -1509,6 +1712,7 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 */
+
 static PyObject *Table_batch(Table *self, PyObject *args) {
     PyObject *actions;
 
@@ -1539,6 +1743,7 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
             //CallBackBuffer *call_back_buffer = CallBackBuffer_create(self, rowBuf);
             CallBackBuffer *call_back_buffer = new CallBackBuffer(self, rowBuf, batch_call_back_buffer);
             batch_call_back_buffer->call_back_buffers.push_back(call_back_buffer);
+            //printf("size of call_back_buffers is %ld\n",sizeof(batch_call_back_buffer->call_back_buffers));
             //In particular, all functions whose function it is to create a new object, such as PyInt_FromLong() and Py_BuildValue(), pass ownership to the receiver.
             char *row_key = PyString_AsString(PyTuple_GetItem(tuple, 1));
             //printf("tuples ref count after pystringasstring 1 is %i\n", tuple->ob_refcnt);
@@ -1592,6 +1797,8 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
         }
 
     }
+
+    // TODO I could check the number of errors in the batch call back buffer
 
     delete batch_call_back_buffer;
     printf("wait was %ld\n",wait);
@@ -1930,7 +2137,7 @@ static PyObject *add_to_dict(PyObject *self, PyObject *args) {
 static PyObject *print_dict(PyObject *self, PyObject *args) {
     PyObject *dict;
 
-    if (!PyArg_ParseTuple(args, "O", &dict)) {
+    if (!PyArg_ParseTuple(args, "O!", &PyDict_Type, &dict)) {
         return NULL;
     }
 

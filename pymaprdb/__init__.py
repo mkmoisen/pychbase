@@ -17,7 +17,8 @@ class Connection(object):
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
 
-    def create_table(self, table_name, ):
+    def create_table(self, table_name, column_families):
+        pass
 
     def close(self):
         pass
