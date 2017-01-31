@@ -39,7 +39,9 @@ class Table(object):
     def delete(self, row_key):
         return self._table.delete(row_key)
 
-    def scan(self, start=None, stop=None):
+    def scan(self, start='', stop=''):
+        # Should start and stop default to None ?
+        # TODO Add filters
         for k, v in self._table.scan(start, stop):
             yield k, v
 

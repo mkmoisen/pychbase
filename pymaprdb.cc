@@ -305,7 +305,7 @@ static const char *col3_1  = "City";
 */
 
 /*
-Given a family and a qualifier, return a fully qualified column
+Given a family and a qualifier, return a fully qualified column (familiy + ":" + qualifier)
 */
 static char *hbase_fqcolumn(char *family, char *column) {
     // +1 for null terminator, +1 for colon
@@ -344,8 +344,8 @@ struct RowBuffer {
         allocedBufs.push_back(newAlloc);
         return newAlloc;
     }
-    PyObject *ret;
-    PyObject *rets;
+    //PyObject *ret;
+    //PyObject *rets;
 };
 
 
@@ -733,10 +733,10 @@ typedef struct {
     // Do I need to INCREF/DECREF this since I am exposing it to the python layer?
     // Is it better or worse taht this is char * instead of PyObject * ?
     char *table_name;
-    pthread_mutex_t mutex;
-    uint64_t count;
-    PyObject *ret;
-    PyObject *rets;
+    //pthread_mutex_t mutex;
+    //uint64_t count;
+    //PyObject *ret;
+    //PyObject *rets;
 } Table;
 
 /*
@@ -754,6 +754,7 @@ struct CallBackBuffer {
     int err;
     PyObject *ret;
     uint64_t count;
+    pthread_mutex_t mutex;
     BatchCallBackBuffer *batch_call_back_buffer;
     //PyObject *rets;
     CallBackBuffer(Table *t, RowBuffer *r, BatchCallBackBuffer *bcbb) {
@@ -762,10 +763,12 @@ struct CallBackBuffer {
         err = 0;
         count = 0;
         batch_call_back_buffer = bcbb;
+        mutex = PTHREAD_MUTEX_INITIALIZER;
     }
     ~CallBackBuffer() {
         //printf("CallBackBuffer Destructor\n");
         delete rowBuf;
+        //Py_XDECREF(ret);
     }
 };
 
@@ -862,8 +865,8 @@ static int Table_init(Table *self, PyObject *args, PyObject *kwargs) {
     self->connection = connection;
     Py_XDECREF(connection);
 
-    self->mutex = PTHREAD_MUTEX_INITIALIZER;
-    self->count = 0;
+    //self->mutex = PTHREAD_MUTEX_INITIALIZER;
+    //self->count = 0;
 
     return 0;
 }
@@ -906,12 +909,14 @@ static int read_result(hb_result_t result, PyObject *dict) {
         // Hm I'm not sure if I have to decref Py_BuildValue for %s, Maybe its only %O
         // http://stackoverflow.com/questions/5508904/c-extension-in-python-return-py-buildvalue-memory-leak-problem
         // TODO Does Py_BuildValue copy in the contents or take the pointer? hbase_fqcolumn is mallocing a pointer and returning the pointer...
+        // For now I'll free it a few lines down
         char *fq = hbase_fqcolumn((char *)cell->family, (char *)cell->qualifier);
         if (!fq) {
             printf("fq was null\n");
             return 12;//ENOMEM Cannot allocate memory
         }
         PyObject *key = Py_BuildValue("s", fq);
+        free(fq);
         PyObject *value = Py_BuildValue("s",(char *)cell->value);
         if (!key || !value) {
             printf("key or value was null\n");
@@ -940,10 +945,13 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
     // I suppose its better to crash the program?
     // Maybe if there was some global count I could increment and check for?
     CallBackBuffer *call_back_buffer = (CallBackBuffer *) extra;
-    call_back_buffer->err = err;
+
     if (err != 0) {
         printf("MapR API failed in row callback %i\n", err);
+        pthread_mutex_lock(&call_back_buffer->mutex);
+        call_back_buffer->err = err;
         call_back_buffer->count = 1;
+        pthread_mutex_unlock(&call_back_buffer->mutex);
         return;
     }
     //call_back_buffer->table->count = 1;
@@ -952,8 +960,10 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
         printf("result is null\n");
         // Note that if there is no row for the rowkey, result is not NULL
         // I doubt err wouldn't be 0 if result is null
+        pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->err = 12;
         call_back_buffer->count = 1;
+        pthread_mutex_unlock(&call_back_buffer->mutex);
         return;
     }
 
@@ -967,18 +977,27 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
     PyObject *dict = PyDict_New();
     if (!dict) {
         printf("dict is null\n");
+        pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->err = 12;
         call_back_buffer->count = 1;
+        pthread_mutex_unlock(&call_back_buffer->mutex);
         return;
     }
 
-    call_back_buffer->err = read_result(result, dict);
-    if (call_back_buffer->err != 0) {
+    err = read_result(result, dict);
+    if (err != 0) {
         printf("read result was %i", call_back_buffer->err);
+        pthread_mutex_lock(&call_back_buffer->mutex);
+        call_back_buffer->err = err;
+        call_back_buffer->count = 1;
+        pthread_mutex_unlock(&call_back_buffer->mutex);
+        return;
     }
     //call_back_buffer->table->ret = dict;
+    pthread_mutex_lock(&call_back_buffer->mutex);
     call_back_buffer->ret = dict;
     call_back_buffer->count = 1;
+    pthread_mutex_unlock(&call_back_buffer->mutex);
 
     hb_result_destroy(result);
     hb_get_destroy(get);
@@ -1083,7 +1102,9 @@ void client_flush_callback(int32_t err, hb_client_t client, void *ctx) {
     }
 }
 
-static void *split(char *fq, char* arr[]) {
+/*
+
+static int split(char *fq, char* arr[]) {
     int i = 0;
     // Initialize family to length + null pointer - 1 for the colon
     char *family = (char *) malloc(sizeof(char) * strlen(fq));
@@ -1112,6 +1133,50 @@ static void *split(char *fq, char* arr[]) {
     //printf("arr[1] is %s\n", arr[1]);
 
 }
+*/
+/*
+import spam
+connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+connection.open()
+
+table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
+table.put("snoop", {"f:foo": "bar"})
+*/
+static int split(char *fq, char *family, char *qualifier) {
+    int i = 0;
+    // Initialize family to length + null pointer - 1 for the colon
+    bool found_colon = false;
+    for (i = 0; i < strlen(fq) && fq[i] != '\0'; i++) {
+        if (fq[i] != ':') {
+            family[i] = fq[i];
+        } else {
+            found_colon = true;
+            break;
+        }
+    }
+    family[i] = '\0';
+
+    if (!found_colon) {
+        return -10;
+    }
+
+    // This works with 1+ or without 1+ ...
+    int qualifier_index = 0;
+    for (i=i + 1; i < strlen(fq) && fq[i] != '\0'; i++) {
+        qualifier[qualifier_index] = fq[i];
+        qualifier_index += 1;
+    }
+    qualifier[qualifier_index] = '\0';
+
+    //arr[0] = family;
+    //arr[1] = qualifier;
+
+    //printf("arr[0] is %s\n", arr[0]);
+    //printf("arr[1] is %s\n", arr[1]);
+    return 0;
+
+}
+
 
 
 
@@ -1134,16 +1199,18 @@ void put_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result
 
     // TODO Check types.h for the HBase error codes
     CallBackBuffer *call_back_buffer = (CallBackBuffer *) extra;
-    call_back_buffer->err = err;
+
     if (err != 0) {
         printf("MapR API Failed on Put Callback %i\n", err);
+        pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->count = 1;
+        call_back_buffer->err = err;
+        pthread_mutex_unlock(&call_back_buffer->mutex);
         if (call_back_buffer->batch_call_back_buffer) {
-            pthread_mutex_lock(&call_back_buffer->table->mutex);
-            call_back_buffer->batch_call_back_buffer->count++;
+            pthread_mutex_lock(&call_back_buffer->batch_call_back_buffer->mutex);
             call_back_buffer->batch_call_back_buffer->errors++;
-            pthread_mutex_unlock(&call_back_buffer->table->mutex);
-
+            call_back_buffer->batch_call_back_buffer->count++;
+            pthread_mutex_unlock(&call_back_buffer->batch_call_back_buffer->mutex);
         }
         return;
     }
@@ -1163,11 +1230,13 @@ void put_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result
     }
     */
 
+    pthread_mutex_lock(&call_back_buffer->mutex);
     call_back_buffer->count = 1;
+    pthread_mutex_unlock(&call_back_buffer->mutex);
     if (call_back_buffer->batch_call_back_buffer) {
-        pthread_mutex_lock(&call_back_buffer->table->mutex);
+        pthread_mutex_lock(&call_back_buffer->batch_call_back_buffer->mutex);
         call_back_buffer->batch_call_back_buffer->count++;
-        pthread_mutex_unlock(&call_back_buffer->table->mutex);
+        pthread_mutex_unlock(&call_back_buffer->batch_call_back_buffer->mutex);
     }
     hb_mutation_destroy(mutation);
     //hb_result_destroy(result);
@@ -1273,7 +1342,7 @@ static int make_put(Table *self, RowBuffer *rowBuf, const char *row_key, PyObjec
     if (size < 1) {
         // TODO for Batch puts do we not want to set the exception message here, but rather in the batch()?
         PyErr_SetString(PyExc_ValueError, "Row contents are empty");
-        return -1;
+        return -5;
     }
 
     err = hb_put_create((byte_t *)row_key, strlen(row_key) + 1, hb_put);
@@ -1286,25 +1355,32 @@ static int make_put(Table *self, RowBuffer *rowBuf, const char *row_key, PyObjec
     PyObject *fq, *value;
     Py_ssize_t pos = 0;
     hb_cell_t *cell;
-    char *arr[2];
+    //char *arr[2];
+    //char arr[2][1024];
     // https://docs.python.org/2/c-api/dict.html?highlight=pydict_next#c.PyDict_Next
     // This says PyDict_Next borrows references for key and value...
     while (PyDict_Next(dict, &pos, &fq, &value)) {
         // Its weird if I loop batch with 100000, the ref count is 100002 for value??
         //printf("value ref count is %i\n", value->ob_refcnt);
-        split(PyString_AsString(fq), arr);
+        char *family = rowBuf->getBuffer(1024);
+        char *qualifier = rowBuf->getBuffer(1024);
+        err = split(PyString_AsString(fq), family, qualifier);
+        if (err != 0) {
+            return err;
+        }
         //printf("family is %s\n", arr[0]);
         //printf("qualifier is %s\n", arr[1]);
         // TODO Have to make sure to free this memory lol
-        char *family = rowBuf->getBuffer(1024);
-        char *qualifier = rowBuf->getBuffer(1024);
+        //char *family = rowBuf->getBuffer(1024);
+        //char *qualifier = rowBuf->getBuffer(1024);
         char *v = rowBuf->getBuffer(1024);
 
 
-        strcpy(family, arr[0]);
-        strcpy(qualifier, arr[1]);
+        //strcpy(family, arr[0]);
+        //strcpy(qualifier, arr[1]);
         // delete [] arr;
         strcpy(v, PyString_AsString(value));
+        //free(arr); //this throws an error lol
 
         //printf("family is %s\n", family);
         //printf("qualifier is %s\n", qualifier);
@@ -1356,6 +1432,9 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     if (err != 0) {
         // This would just override the error message set in make_put
         // PyErr_SetString(PyExc_ValueError, "Could not create put oh noo");
+        if (err == -10) {
+            PyErr_SetString(PyExc_ValueError, "All keys must contain a colon delimiting the family and qualifier");
+        }
         return NULL;
     }
 
@@ -1382,6 +1461,7 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     int wait = 0;
 
     //while (self->count != 1) {
+    // TODO Do I need to aquire the lock on this?
     while (call_back_buffer->count != 1) {
         sleep(0.1);
         wait++;
@@ -1399,7 +1479,12 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     delete call_back_buffer;
     CHECK_RC_RETURN(err);
     if (err != 0) {
-        PyErr_SetString(PyExc_ValueError, "Error in put callback");
+        if (err == 2) {
+            PyErr_SetString(PyExc_ValueError, "Error in put callback, probably bad column family");
+        } else {
+            PyErr_SetString(PyExc_ValueError, "Unknown Error in put callback");
+        }
+
         return NULL;
     }
 
@@ -1408,7 +1493,24 @@ static PyObject *Table_put(Table *self, PyObject *args) {
 
 void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t numResults, void *extra) {
     //printf("In sn_cb\n");
-    Table *table = (Table *) extra;
+    printf("In scan callback\n");
+
+    CallBackBuffer *call_back_buffer = (CallBackBuffer *) extra;
+    if (err != 0) {
+        pthread_mutex_lock(&call_back_buffer->mutex);
+        call_back_buffer->err = err;
+        call_back_buffer->count = 1;
+        pthread_mutex_unlock(&call_back_buffer->mutex);
+        return;
+    }
+    if (!results) {
+        pthread_mutex_lock(&call_back_buffer->mutex);
+        call_back_buffer->err = 12;
+        call_back_buffer->count = 1;
+        pthread_mutex_unlock(&call_back_buffer->mutex);
+        return;
+    }
+
     if (numResults > 0) {
         //printf("bnefore rowbuff = extra\n");
 
@@ -1418,36 +1520,92 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
             //printf("looping\n");
             const byte_t *key;
             size_t keyLen;
-            hb_result_get_key(results[r], &key, &keyLen);
+            // API doesn't document when this returns something other than 0
+            err = hb_result_get_key(results[r], &key, &keyLen);
+            if (err != 0) {
+                pthread_mutex_lock(&call_back_buffer->mutex);
+                call_back_buffer->err = err;
+                call_back_buffer->count = 1;
+                pthread_mutex_unlock(&call_back_buffer->mutex);
+                return;
+            }
             //printf("Row: %s\t", (char *)key);
             // Do I need a null check?
             dict = PyDict_New();
+            if (!dict) {
+                pthread_mutex_lock(&call_back_buffer->mutex);
+                call_back_buffer->err = 12;
+                call_back_buffer->count = 1;
+                pthread_mutex_unlock(&call_back_buffer->mutex);
+                return;
+            }
             //printf("dicts ref count %i\n", dict->ob_refcnt);
             //printf("before reading result into dict\n");
-            read_result(results[r], dict);
+            err = read_result(results[r], dict);
+            if (err != 0) {
+                pthread_mutex_lock(&call_back_buffer->mutex);
+                call_back_buffer->err = err;
+                call_back_buffer->count = 1;
+                pthread_mutex_unlock(&call_back_buffer->mutex);
+                Py_DECREF(dict);
+                // TODO If I decref this will i seg fault if i access it later?
+                // Should itb e set to a none?
+                return;
+            }
             //printf("dicts ref count after read_results %i\n", dict->ob_refcnt);
             //printf("before append\n");
             // Do I need to INCREF the result of Py_BuildValue?
             // Should I do that ! with the type? Does that make it faster or slower lol
-            PyList_Append(table->rets, Py_BuildValue("sO",(char *)key, dict));
+            PyObject *tuple = Py_BuildValue("sO",(char *)key, dict);
+            if (!tuple) {
+                pthread_mutex_lock(&call_back_buffer->mutex);
+                call_back_buffer->err = 12;
+                call_back_buffer->count = 1;
+                pthread_mutex_unlock(&call_back_buffer->mutex);
+                Py_DECREF(dict);
+                return;
+            }
+
+            err = PyList_Append(call_back_buffer->ret, tuple);
+            if (err != 0) {
+                pthread_mutex_lock(&call_back_buffer->mutex);
+                call_back_buffer->err = err;
+                call_back_buffer->count = 1;
+                pthread_mutex_unlock(&call_back_buffer->mutex);
+                Py_DECREF(dict);
+                Py_DECREF(tuple);
+                // TODO If I decref this will i seg fault if i access it later?
+                // Should itb e set to a none?
+                return;
+            }
             //printf("dicts ref count after append %i\n", dict->ob_refcnt);
 
             Py_DECREF(dict);
-             printf("dicts ref count after decref %i", dict->ob_refcnt);
+            //printf("dicts ref count after decref %i", dict->ob_refcnt);
 
             //printf("\n");
             //printf("before destroy\n");
             hb_result_destroy(results[r]);
         }
-
-        hb_scanner_next(scan, scan_callback, table);
+        // The API doesn't specify when the return value would not be 0
+        // But it is used in this unittest:
+        // https://github.com/mapr/libhbase/blob/0ddda015113452955ed600116f58a47eebe3b24a/src/test/native/unittests/libhbaseutil.cc#L760
+        err = hb_scanner_next(scan, scan_callback, call_back_buffer);
+        CHECK_RC_RETURN(err);
+        if (err != 0) {
+            //PyErr_SetString(PyExc_ValueError, "Failed in scanner callback");
+            pthread_mutex_lock(&call_back_buffer->mutex);
+            call_back_buffer->err = err;
+            call_back_buffer->count = 1;
+            pthread_mutex_unlock(&call_back_buffer->mutex);
+            return;
+        }
     } else {
-        printf(" ----- NO MORE RESULTS -----\n");
-        hb_scanner_destroy(scan, NULL, NULL);
-        sleep(0.1);
-        pthread_mutex_lock(&table->mutex);
-        table->count = 1;
-        pthread_mutex_unlock(&table->mutex);
+        //sleep(0.1);
+        // TODO Is it necessary to aquire the lock here? Isn't there only going to be one thread on this?
+        pthread_mutex_lock(&call_back_buffer->mutex);
+        call_back_buffer->count = 1;
+        pthread_mutex_unlock(&call_back_buffer->mutex);
     }
 }
 
@@ -1461,62 +1619,96 @@ table.scan('hello', 'hello100~')
 */
 
 static PyObject *Table_scan(Table *self, PyObject *args) {
-    char *start = NULL;
-    char *stop = NULL;
+    char *start = "";
+    char *stop = "";
 
     if (!PyArg_ParseTuple(args, "|ss", &start, &stop)) {
         return NULL;
     }
-
-    self->rets = PyList_New(0);
 
     int err = 0;
 
     hb_scanner_t scan;
     err = hb_scanner_create(self->connection->client, &scan);
     CHECK_RC_RETURN(err);
-    printf("RC for scanner create was %i\n", err);
+    if (err != 0) {
+        PyErr_SetString(PyExc_ValueError, "Failed to create the scanner");
+        return NULL;
+    }
 
     err = hb_scanner_set_table(scan, self->table_name, strlen(self->table_name));
     CHECK_RC_RETURN(err);
-    printf("RC for set table was %i\n", err);
+    if (err != 0) {
+        PyErr_SetString(PyExc_ValueError, "Failed to set table on scanner");
+        return NULL;
+    }
 
+    // TODO parameratize this
     err = hb_scanner_set_num_versions(scan, 1);
     CHECK_RC_RETURN(err);
-    printf("RC for num versions  was %i\n", err);
+    if (err != 0) {
+        PyErr_SetString(PyExc_ValueError, "Failed to set num versions on scanner");
+        return NULL;
+    }
 
-    if (start) {
+    if (strlen(start) > 0) {
         // Do I need strlen + 1 ?
         err = hb_scanner_set_start_row(scan, (byte_t *) start, strlen(start));
         CHECK_RC_RETURN(err);
-        printf("RC for start row  was %i\n", err);
+        if (err != 0) {
+            PyErr_SetString(PyExc_ValueError, "Failed to set start row on scanner");
+            return NULL;
+        }
     }
-    if (stop) {
+    if (strlen(stop) > 1) {
         // do I need strlen + 1 ?
         err = hb_scanner_set_end_row(scan, (byte_t *) stop, strlen(stop));
         CHECK_RC_RETURN(err);
-        printf("RC for stop row  was %i\n", err);
+        if (err != 0) {
+            PyErr_SetString(PyExc_ValueError, "Failed to set stop row on scanner");
+            return NULL;
+        }
     }
 
     // Does it optimize if I set this higher?
+    // TODO what is this?
     err = hb_scanner_set_num_max_rows(scan, 1);
     CHECK_RC_RETURN(err);
-    printf("RC for set num max rows  was %i\n", err);
+    if (err != 0) {
+        PyErr_SetString(PyExc_ValueError, "Failed to set num_max_rows scanner");
+        return NULL;
+    }
 
-    self->count = 0;
-    err = hb_scanner_next(scan, scan_callback, self);
+    RowBuffer *rowBuf = new RowBuffer();
+    CallBackBuffer *call_back_buffer = new CallBackBuffer(self, rowBuf, NULL);
+    //self->rets = PyList_New(0);
+    call_back_buffer->ret = PyList_New(0);
+
+
+    err = hb_scanner_next(scan, scan_callback, call_back_buffer);
     CHECK_RC_RETURN(err);
-    printf("RC for scanner next  was %i\n", err);
+    if (err != 0) {
+        PyErr_SetString(PyExc_ValueError, "Failed in scanner callback");
+        return NULL;
+    }
 
     int wait = 0;
-    while (self->count == 0) {
+    while (call_back_buffer->count != 1) {
         sleep(0.1);
         wait += 1;
     }
 
-    return self->rets;
-
-
+    // TODO I need to free this right
+    PyObject *ret = call_back_buffer->ret;
+    printf("ret has ref count of %i\n", ret->ob_refcnt);
+    err = call_back_buffer->err;
+    delete call_back_buffer;
+    printf("after delete call back buffer has ref count of %i\n", ret->ob_refcnt);
+    if (err == 0) {
+        return ret;
+    }
+    PyErr_SetString(PyExc_ValueError, "Error in scanner callback");
+    return NULL;
 }
 
 void delete_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result_t result, void *extra) {
@@ -1524,15 +1716,19 @@ void delete_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_res
 
     //Table *table = (Table *) extra;
     CallBackBuffer *call_back_buffer = (CallBackBuffer *) extra;
-    call_back_buffer->err = err;
+
     if (err != 0) {
         printf("MapR API Failed on Delete Callback %i\n", err);
+        // TODO Do I need to aquire the lock
+        pthread_mutex_lock(&call_back_buffer->mutex);
+        call_back_buffer->err = err;
         call_back_buffer->count = 1;
+        pthread_mutex_unlock(&call_back_buffer->mutex);
         if (call_back_buffer->batch_call_back_buffer) {
-            pthread_mutex_lock(&call_back_buffer->table->mutex);
-            call_back_buffer->batch_call_back_buffer->count++;
+            pthread_mutex_lock(&call_back_buffer->batch_call_back_buffer->mutex);
             call_back_buffer->batch_call_back_buffer->errors++;
-            pthread_mutex_unlock(&call_back_buffer->table->mutex);
+            call_back_buffer->batch_call_back_buffer->count++;
+            pthread_mutex_unlock(&call_back_buffer->batch_call_back_buffer->mutex);
         }
 
         return;
@@ -1554,12 +1750,14 @@ void delete_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_res
     */
 
 
+    // TODO Do I need to aquire a lock here
+    pthread_mutex_lock(&call_back_buffer->mutex);
     call_back_buffer->count = 1;
+    pthread_mutex_unlock(&call_back_buffer->mutex);
     if (call_back_buffer->batch_call_back_buffer) {
-        pthread_mutex_lock(&call_back_buffer->table->mutex);
+        pthread_mutex_lock(&call_back_buffer->batch_call_back_buffer->mutex);
         call_back_buffer->batch_call_back_buffer->count++;
-        call_back_buffer->batch_call_back_buffer->errors++;
-        pthread_mutex_unlock(&call_back_buffer->table->mutex);
+        pthread_mutex_unlock(&call_back_buffer->batch_call_back_buffer->mutex);
     }
 
 }
@@ -1576,6 +1774,12 @@ table.delete('hello1')
 
 static int make_delete(Table *self, char *row_key, hb_delete_t *hb_delete) {
     int err = 0;
+
+    if (strlen(row_key) == 0) {
+        err = -5;
+        PyErr_SetString(PyExc_ValueError, "row_key was empty string");
+        return err;
+    }
 
     err = hb_delete_create((byte_t *)row_key, strlen(row_key) + 1, hb_delete);
     CHECK_RC_RETURN(err);
@@ -1720,8 +1924,6 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
         return NULL;
     }
 
-    self->count = 0;
-
     int err;
 
     PyObject *tuple;
@@ -1787,6 +1989,7 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
         sleep(0.1);
         wait++;
         //printf("wait is %i\n",wait);
+        /*
         if (wait > 10000000) {
             //printf("wait is %i\n",wait);
             //printf("Count is %i\n", self->count);
@@ -1795,6 +1998,7 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
             return NULL;
 
         }
+        */
 
     }
 
@@ -2213,7 +2417,9 @@ static PyObject *super_dict(PyObject *self, PyObject *args) {
     printf("Second is %s\n", second);
 
     PyDict_SetItem(dict, Py_BuildValue("s", first), Py_BuildValue("s", v1));
+    free(first);
     PyDict_SetItem(dict, Py_BuildValue("s", second), Py_BuildValue("s", v2));
+    free(second);
 
     return dict;
 }
