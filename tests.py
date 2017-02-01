@@ -183,7 +183,9 @@ class TestCTablePut(unittest.TestCase):
     def test_happy(self):
         self.table.put("foo", {"f:bar": "baz"})
         row = self.table.row('foo')
-        self.assertEquals(row, {'f:bar': "baz"})
+        for _ in range(10):
+            # Loop to check for buffer overflow error
+            self.assertEquals(row, {'f:bar': "baz"})
 
     def test_empty_put(self):
         self.assertRaises(ValueError, self.table.put, 'foo', {})
@@ -505,8 +507,34 @@ connection.create_table(TABLE_NAME, {'f': {}})
 table = _table(connection, TABLE_NAME)
 table.put("test", {"f:foo": "bar"})
 table.row('test')
+table.delete('test')
+table.row('test')
 
 """
+
+"""
+from spam import _connection, _table
+CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
+connection = _connection(CLDBS)
+connection.delete_table(TABLE_NAME)
+connection.create_table(TABLE_NAME, {'f': {}})
+table = _table(connection, TABLE_NAME)
+for i in range(10):
+    table.put("test{}".format(i), {"f:foo{}".format(i): "bar{}".format(i)})
+
+for k, v in table.scan():
+    print k, v
+
+for k, v in table.scan('test3'):
+    print k, v
+
+for k, v in table.scan():
+    print k, v
+
+
+"""
+
 
 """
 from spam import _connection, _table

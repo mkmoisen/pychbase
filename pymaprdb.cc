@@ -307,19 +307,42 @@ static const char *col3_1  = "City";
 /*
 Given a family and a qualifier, return a fully qualified column (familiy + ":" + qualifier)
 */
-static char *hbase_fqcolumn(char *family, char *column) {
+
+static char *hbase_fqcolumn(const hb_cell_t *cell) {
+    if (!cell) {
+        printf("cell is null\n");
+        return NULL;
+    }
+    char *family = (char *) cell->family;
+    char *qualifier = (char *) cell->qualifier;
+
+    int family_len = cell->family_len;
+    int qualifier_len = cell->qualifier_len;
+    printf("family_len is %i\n", family_len);
+    printf("family is %s\n", family);
+    printf("qualifier_len is %i\n", qualifier_len);
+    printf("qualifier is %s\n", qualifier);
+
     // +1 for null terminator, +1 for colon
-    char *fq = (char *) malloc(1 + 1 + strlen(family) + strlen(column));
+    //TODO This one is probably correct
+    char *fq = (char *) malloc(1 + 1 + family_len + qualifier_len);
+
     if (!fq) {
         return NULL;
     }
-    strcpy(fq, family);
-    fq[strlen(family)] = ':';
-    fq[strlen(family) + 1] = '\0';
+    strncpy(fq, family, family_len);
+    printf("fq is %s\n", fq);
+    fq[family_len] = ':';
+    printf("fq is %s\n", fq);
+    fq[family_len + 1] = '\0';
+    //fq[strlen(family)] = '\0';
+    printf("fq is %s\n", fq);
     // strcat will replace the last null terminator before writing, then add a null terminator
-    strcat(fq, column);
+    strncat(fq, qualifier, qualifier_len);
+    printf("fq is %s\n", fq);
     return fq;
 }
+
 
 struct RowBuffer {
     std::vector<char *> allocedBufs;
@@ -976,6 +999,18 @@ static int read_result(hb_result_t result, PyObject *dict) {
         const hb_cell_t *cell;
          // Do I need to error check this?
         hb_result_get_cell_at(result, i, &cell);
+        if (!cell) {
+            printf("cell was null\n");
+            return 12;
+        }
+
+        int value_len = cell->value_len;
+        char *value_cell = (char *) cell->value;
+        char *value_char = (char *) malloc(1 + value_len);
+        strncpy(value_char, value_cell, value_len);
+        printf("cell->value is %s value_char is %s value_len is %i strlen(value_char) is %i\n", value_cell, value_char, value_len, strlen(value_char));
+        value_char[value_len] = '\0';
+        printf("cell->value is %s value_char is %s value_len is %i strlen(value_char) is %i\n", value_cell, value_char, value_len, strlen(value_char));
 
         // Set item steals the ref right? No need to INC/DEC?
         // No it doesn't https://docs.python.org/2/c-api/dict.html?highlight=pydict_setitem#c.PyDict_SetItem
@@ -984,18 +1019,23 @@ static int read_result(hb_result_t result, PyObject *dict) {
         // http://stackoverflow.com/questions/5508904/c-extension-in-python-return-py-buildvalue-memory-leak-problem
         // TODO Does Py_BuildValue copy in the contents or take the pointer? hbase_fqcolumn is mallocing a pointer and returning the pointer...
         // For now I'll free it a few lines down
-        char *fq = hbase_fqcolumn((char *)cell->family, (char *)cell->qualifier);
+        char *fq = hbase_fqcolumn(cell);
+
         if (!fq) {
             printf("fq was null\n");
             return 12;//ENOMEM Cannot allocate memory
         }
         PyObject *key = Py_BuildValue("s", fq);
         free(fq);
-        PyObject *value = Py_BuildValue("s",(char *)cell->value);
+        printf("after free fq\n");
+        //PyObject *value = Py_BuildValue("s",(char *)cell->value);
+        PyObject *value = Py_BuildValue("s", value_char);
         if (!key || !value) {
             printf("key or value was null\n");
             return 12; //ENOMEM Cannot allocate memory
         }
+        free(value_char);
+        printf("keys ref count is %i\n", key->ob_refcnt);
         //PyDict_SetItem(dict, Py_BuildValue("s", hbase_fqcolumn((char *)cell->family, (char *)cell->qualifier)), Py_BuildValue("s",(char *)cell->value));
         err = PyDict_SetItem(dict, key, value);
         if (err != 0) {
@@ -1003,6 +1043,8 @@ static int read_result(hb_result_t result, PyObject *dict) {
             // Is this check necessary?
             return err;
         }
+        printf("keys ref count after set item is %i\n", key->ob_refcnt);
+        // TODO Do I need to decref key and value?
 
     }
 
@@ -1420,7 +1462,7 @@ static int make_put(Table *self, RowBuffer *rowBuf, const char *row_key, PyObjec
         return -5;
     }
 
-    err = hb_put_create((byte_t *)row_key, strlen(row_key) + 1, hb_put);
+    err = hb_put_create((byte_t *)row_key, strlen(row_key), hb_put);
     CHECK_RC_RETURN(err);
     if (err != 0) {
         PyErr_SetString(PyExc_ValueError, "Could not create put");
@@ -1458,7 +1500,8 @@ static int make_put(Table *self, RowBuffer *rowBuf, const char *row_key, PyObjec
             printf("value_char is null in make_put\n");
             return -1;
         }
-        char *v = rowBuf->getBuffer(strlen(value_char) + 1);
+        //char *v = rowBuf->getBuffer(strlen(value_char) + 1);
+        char *v = rowBuf->getBuffer(strlen(value_char));
 
 
         //strcpy(family, arr[0]);
@@ -1472,7 +1515,11 @@ static int make_put(Table *self, RowBuffer *rowBuf, const char *row_key, PyObjec
         //printf("v is %s\n", v);
 
         //printf("creating dummy cell\n");
-        create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family) + 1, qualifier, strlen(qualifier) + 1, v, strlen(v) + 1);
+        // How come I wasn't doing +1 on row key??
+        //create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family) + 1, qualifier, strlen(qualifier) + 1, v, strlen(v) + 1);
+        printf("strlen(family) is %i\n", strlen(family));
+        printf("strlen(qualifier) is %i\n", strlen(qualifier));
+        create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family), qualifier, strlen(qualifier), v, strlen(v));
         //printf("put add cell\n");
         err = hb_put_add_cell(*hb_put, cell);;
         CHECK_RC_RETURN(err);
@@ -1614,6 +1661,13 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 pthread_mutex_unlock(&call_back_buffer->mutex);
                 return;
             }
+
+            char *key_char = (char *) malloc(1 + keyLen);
+            strncpy(key_char, (char *)key, keyLen);
+            key_char[keyLen] = '\0';
+
+            printf("key is %s keyLen is %i key_char is %s\n", key, keyLen, key_char);
+
             //printf("Row: %s\t", (char *)key);
             // Do I need a null check?
             dict = PyDict_New();
@@ -1641,7 +1695,9 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
             //printf("before append\n");
             // Do I need to INCREF the result of Py_BuildValue?
             // Should I do that ! with the type? Does that make it faster or slower lol
-            PyObject *tuple = Py_BuildValue("sO",(char *)key, dict);
+            //PyObject *tuple = Py_BuildValue("sO",(char *)key, dict);
+            PyObject *tuple = Py_BuildValue("sO",(char *)key_char, dict);
+            free(key_char);
             if (!tuple) {
                 pthread_mutex_lock(&call_back_buffer->mutex);
                 call_back_buffer->err = 12;
@@ -1866,7 +1922,8 @@ static int make_delete(Table *self, char *row_key, hb_delete_t *hb_delete) {
         return err;
     }
 
-    err = hb_delete_create((byte_t *)row_key, strlen(row_key) + 1, hb_delete);
+    //err = hb_delete_create((byte_t *)row_key, strlen(row_key) + 1, hb_delete);
+    err = hb_delete_create((byte_t *)row_key, strlen(row_key), hb_delete);
     CHECK_RC_RETURN(err);
     if (err != 0) {
         PyErr_SetString(PyExc_ValueError, "Could not create delete");
@@ -2658,6 +2715,7 @@ static PyObject *build_list(PyObject *self, PyObject *args) {
     return list;
 }
 
+/*
 static PyObject *super_dict(PyObject *self, PyObject *args) {
     char *f1;
     char *k1;
@@ -2675,12 +2733,12 @@ static PyObject *super_dict(PyObject *self, PyObject *args) {
     printf("f2 is %s\n", f2);
     printf("k2 is %s\n", k2);
     printf("v2 is %s\n", v2);
-    /*
-    char *first = (char *) malloc(1 + 1 + strlen(f1) + strlen(f2));
-    strcpy(first, f1);
-    first[strlen(f1)] = ':';
-    strcat(first, k1);
-    */
+
+    //char *first = (char *) malloc(1 + 1 + strlen(f1) + strlen(f2));
+    //strcpy(first, f1);
+    //first[strlen(f1)] = ':';
+    //strcat(first, k1);
+
 
     // somehow take args as a tuple
     PyObject *dict = PyDict_New();
@@ -2704,6 +2762,7 @@ static PyObject *super_dict(PyObject *self, PyObject *args) {
 
     return dict;
 }
+*/
 
 static PyObject *print_list(PyObject *self, PyObject *args) {
     //PyListObject seems to suck, it isn't accepted by PyList_Size for example
@@ -2822,7 +2881,7 @@ static PyMethodDef SpamMethods[] = {
     {"build_int", build_int, METH_VARARGS, "build an int"},
     {"build_dict", build_dict, METH_VARARGS, "build a dict"},
     {"add_to_dict", add_to_dict, METH_VARARGS, "add to dict"},
-    {"super_dict", super_dict, METH_VARARGS, "super dict"},
+    //{"super_dict", super_dict, METH_VARARGS, "super dict"},
     {"print_dict", print_dict, METH_VARARGS, "print dict"},
     {"build_list", build_list, METH_VARARGS, "build list"},
     {"print_list", print_list, METH_VARARGS, "prints a list"},
