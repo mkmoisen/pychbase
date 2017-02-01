@@ -307,30 +307,17 @@ static const char *col3_1  = "City";
 /*
 Given a family and a qualifier, return a fully qualified column (familiy + ":" + qualifier)
 */
-// TODO Should I really be mallocing here
-// I guess I'm freeing it in the calling code
 static char *hbase_fqcolumn(char *family, char *column) {
     // +1 for null terminator, +1 for colon
-    //TODO This one is probably correct
     char *fq = (char *) malloc(1 + 1 + strlen(family) + strlen(column));
-    printf("strlen(family) is %i\n", strlen(family));
-    printf("strlen(column) is %i\n", strlen(column));
-    //char *fq = (char *) malloc(1 + strlen(family) + strlen(column));
     if (!fq) {
         return NULL;
     }
-    printf("family is %s\n", family);
-    printf("column is %s\n", column);
     strcpy(fq, family);
-    printf("fq is %s\n", fq);
     fq[strlen(family)] = ':';
-    printf("fq is %s\n", fq);
     fq[strlen(family) + 1] = '\0';
-    //fq[strlen(family)] = '\0';
-    printf("fq is %s\n", fq);
     // strcat will replace the last null terminator before writing, then add a null terminator
     strcat(fq, column);
-    printf("fq is %s\n", fq);
     return fq;
 }
 
@@ -997,7 +984,6 @@ static int read_result(hb_result_t result, PyObject *dict) {
         // http://stackoverflow.com/questions/5508904/c-extension-in-python-return-py-buildvalue-memory-leak-problem
         // TODO Does Py_BuildValue copy in the contents or take the pointer? hbase_fqcolumn is mallocing a pointer and returning the pointer...
         // For now I'll free it a few lines down
-        printf("strlen(value) is %s\n", ((char *)cell->value));
         char *fq = hbase_fqcolumn((char *)cell->family, (char *)cell->qualifier);
         if (!fq) {
             printf("fq was null\n");
@@ -1131,8 +1117,7 @@ static PyObject *Table_row(Table *self, PyObject *args) {
     int err = 0;
 
     hb_get_t get;
-    //err = hb_get_create((const byte_t *)row_key, strlen(row_key) + 1, &get);
-    err = hb_get_create((const byte_t *)row_key, strlen(row_key), &get);
+    err = hb_get_create((const byte_t *)row_key, strlen(row_key) + 1, &get);
     CHECK_RC_RETURN(err);
     if (err != 0) {
         PyErr_SetString(PyExc_ValueError, "Could not create get");
@@ -1436,7 +1421,6 @@ static int make_put(Table *self, RowBuffer *rowBuf, const char *row_key, PyObjec
     }
 
     err = hb_put_create((byte_t *)row_key, strlen(row_key) + 1, hb_put);
-    //err = hb_put_create((byte_t *)row_key, strlen(row_key), hb_put);
     CHECK_RC_RETURN(err);
     if (err != 0) {
         PyErr_SetString(PyExc_ValueError, "Could not create put");
@@ -1488,11 +1472,7 @@ static int make_put(Table *self, RowBuffer *rowBuf, const char *row_key, PyObjec
         //printf("v is %s\n", v);
 
         //printf("creating dummy cell\n");
-        // How come I wasn't doing +1 on row key??
         create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family) + 1, qualifier, strlen(qualifier) + 1, v, strlen(v) + 1);
-        printf("strlen(family) is %i\n", strlen(family));
-        printf("strlen(qualifier) is %i\n", strlen(qualifier));
-        //create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family), qualifier, strlen(qualifier), v, strlen(v));
         //printf("put add cell\n");
         err = hb_put_add_cell(*hb_put, cell);;
         CHECK_RC_RETURN(err);
