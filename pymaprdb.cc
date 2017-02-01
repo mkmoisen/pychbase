@@ -1159,7 +1159,7 @@ static PyObject *Table_row(Table *self, PyObject *args) {
     int err = 0;
 
     hb_get_t get;
-    err = hb_get_create((const byte_t *)row_key, strlen(row_key) + 1, &get);
+    err = hb_get_create((const byte_t *)row_key, strlen(row_key), &get);
     CHECK_RC_RETURN(err);
     if (err != 0) {
         PyErr_SetString(PyExc_ValueError, "Could not create get");
