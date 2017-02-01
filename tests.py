@@ -36,6 +36,14 @@ class TestCConnectionManageTable(unittest.TestCase):
             pass
         connection.close()
 
+    def tearDown(self):
+        connection = _connection(CLDBS)
+        try:
+            connection.delete_table(TABLE_NAME)
+        except ValueError:
+            pass
+        connection.close()
+
     def test_good(self):
         connection = _connection(CLDBS)
         connection.create_table(TABLE_NAME, {'f': {}})
@@ -52,6 +60,66 @@ class TestCConnectionManageTable(unittest.TestCase):
         connection.create_table(TABLE_NAME, {'f': {}})
         connection.delete_table(TABLE_NAME)
         self.assertRaises(ValueError, connection.delete_table, TABLE_NAME)
+
+    def test_large_qualifier(self):
+        connection = _connection(CLDBS)
+        connection.create_table(TABLE_NAME, {''.join(['a' for _ in range(1000)]): {}})
+        connection.delete_table(TABLE_NAME)
+
+    def test_too_large_qualifier(self):
+        connection = _connection(CLDBS)
+        self.assertRaises(ValueError, connection.create_table, TABLE_NAME, {''.join(['a' for _ in range(10000)]): {}})
+        # Verify that table was not fake-created mapr bug
+        self.assertRaises(ValueError, connection.delete_table, TABLE_NAME)
+
+    def test_really_big_table_name(self):
+        ## I think MapR C API seg faults with a tablename > 10000
+        connection = _connection(CLDBS)
+        self.assertRaises(ValueError, connection.create_table, TABLE_NAME + ''.join(['a' for _ in range(10000)]), {'f': {}})
+        self.assertRaises(ValueError, connection.delete_table, TABLE_NAME + ''.join(['a' for _ in range(10000)]))
+
+    def test_pretty_big_table_name(self):
+        ## I think MapR C API does not seg faults with a tablename ~ 1000
+        connection = _connection(CLDBS)
+        self.assertRaises(ValueError, connection.create_table, TABLE_NAME + ''.join(['a' for _ in range(1000)]), {'f': {}})
+        self.assertRaises(ValueError, connection.delete_table, TABLE_NAME + ''.join(['a' for _ in range(1000)]))
+
+    def test_delete_really_big_table_name(self):
+        connection = _connection(CLDBS)
+        self.assertRaises(ValueError, connection.delete_table, TABLE_NAME + ''.join(['a' for _ in range(10000)]))
+
+    def test_delete_pretty_big_table_name(self):
+        connection = _connection(CLDBS)
+        self.assertRaises(ValueError, connection.delete_table, TABLE_NAME + ''.join(['a' for _ in range(1000)]))
+
+    def test_max_versions_happy(self):
+        connection = _connection(CLDBS)
+        connection.create_table(TABLE_NAME, {'f': {
+            'max_versions': 1,
+            'min_versions': 1,
+            'time_to_live': 0,
+            'in_memory': 0,
+        }})
+        connection.delete_table(TABLE_NAME)
+
+
+    def test_max_version_bad(self):
+        connection = _connection(CLDBS)
+        self.assertRaises(ValueError, connection.create_table, TABLE_NAME, {'f': {'max_versions': 'foo',}})
+        self.assertRaises(ValueError, connection.delete_table, TABLE_NAME)
+        self.assertRaises(ValueError, connection.create_table, TABLE_NAME, {'f': {'max_versions': 10000000000000000000}})
+
+    def test_invalid_key(self):
+        connection = _connection(CLDBS)
+        self.assertRaises(ValueError, connection.create_table, TABLE_NAME, {'f': {'foo': 'foo'}})
+
+    def test_accept_unicode(self):
+        connection = _connection(CLDBS)
+        connection.create_table(TABLE_NAME, {u'f': {u'max_versions': 1}})
+
+
+
+
 
 
 
@@ -124,11 +192,95 @@ class TestCTablePut(unittest.TestCase):
         """All keys in the put dict must contain a colon separating the family from the qualifier"""
         self.assertRaises(ValueError, self.table.put, 'foo', {'bar': 'baz'})
 
+    def test_bad_colon_no_family(self):
+        self.assertRaises(ValueError, self.table.put, 'foo', {":bar": "baz", 'invalid:foo': 'bar'})
+        row = self.table.row('foo')
+        self.assertEquals(row, {})
+
+    def test_bad_colon_no_qualifier(self):
+        # LOL Apparently this is totaly fine
+        self.assertRaises(ValueError, self.table.put, 'foo', {"f:": "baz"})
+        row = self.table.row('foo')
+        self.assertEquals(row, {})
+
     def test_invalid_column_family(self):
         self.assertRaises(ValueError, self.table.put, 'foo', {"f:bar": "baz", 'invalid:foo': 'bar'})
         row = self.table.row('foo')
         self.assertEquals(row, {})
 
+    def test_set(self):
+        self.assertRaises(TypeError, self.table.put, 'foo', {"f:bar", "baz"})
+        row = self.table.row('foo')
+        self.assertEquals(row, {})
+
+    def test_empty_value(self):
+        self.table.put("foo", {"f:bar": ""})
+        row = self.table.row('foo')
+        self.assertEquals(row, {'f:bar': ""})
+
+    def test_unicode(self):
+        self.table.put(u"foo", {u"f:bar": u"baz"})
+        row = self.table.row('foo')
+        self.assertEquals(row, {'f:bar': "baz"})
+
+    def test_big_value(self):
+        ## Greater than 1024
+        self.table.put('foo', {'f:bar': ''.join(['a' for _ in range(10000)])})
+        row = self.table.row('foo')
+        self.assertEquals(row, {'f:bar': ''.join(['a' for _ in range(10000)])})
+
+    def test_big_qualifier(self):
+        ## Greater than 1024
+        self.table.put('foo', {'f:' + ''.join(['a' for _ in range(10000)]): 'baz'})
+        row = self.table.row('foo')
+        self.assertEquals(row, {'f:' + ''.join(['a' for _ in range(10000)]): 'baz'})
+
+    def test_big_row_key(self):
+        ## Greater than 1024
+        self.table.put(''.join(['a' for _ in range(10000)]), {'f:bar': 'baz'})
+        row = self.table.row(''.join(['a' for _ in range(10000)]))
+        self.assertEquals(row, {'f:bar': 'baz'})
+
+    def test_big_column_family(self):
+        self.connection.delete_table(TABLE_NAME)
+        self.connection.create_table(TABLE_NAME, {''.join(['a' for _ in range(1000)]): {}})
+        self.table.put('foo', {''.join(['a' for _ in range(1000)]) + ':bar': 'baz'})
+        row = self.table.row('foo')
+        self.assertEquals(row, {''.join(['a' for _ in range(1000)]) + ':bar': 'baz'})
+
+
+class TestCTablePutSplit(unittest.TestCase):
+    """Purpose of this is to test the C split function"""
+    def setUp(self):
+        self.connection = _connection(CLDBS)
+
+    def tearDown(self):
+        try:
+            self.connection.delete_table(TABLE_NAME)
+        except ValueError:
+            pass
+        self.connection.close()
+
+    def test_first(self):
+        self.connection.create_table(TABLE_NAME, {'f': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+        self.table.put("a", {"f:{cq}".format(cq='f' * i): str(i) for i in range(100)})
+        row = self.table.row("a")
+        self.assertEquals(row, {"f:{cq}".format(cq='f' * i): str(i) for i in range(100)})
+
+    def test_second(self):
+        self.connection.create_table(TABLE_NAME, {'ff': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+        self.table.put("a", {"ff:{cq}".format(cq='f' * i): str(i) for i in range(100)})
+        row = self.table.row("a")
+        self.assertEquals(row, {"ff:{cq}".format(cq='f' * i): str(i) for i in range(100)})
+
+    def test_third(self):
+        self.connection.create_table(TABLE_NAME, {'fff': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+        self.table.put("a", {"fff:{cq}".format(cq='f' * i): str(i) for i in range(100)})
+        row = self.table.row("a")
+        self.assertEquals(row, {"fff:{cq}".format(cq='f' * i): str(i) for i in range(100)})
 
 
 
@@ -257,8 +409,39 @@ class TestCTableBatch(unittest.TestCase):
 
         self.assertEquals(i, 0)
 
-    def test_mixed_errors(self):
+    def test_mixed_errors_put(self):
+        actions = [
+            ('put', 'a', {'f:foo': 'bar'}),
+            ('put', 'b', {'f': 'bar'}),
+            ('put', 'c', {'f:': 'bar'}),
+            ('put', 'd', {':foo': 'bar'}),
+            ('put', 'e', {'invalid:foo': 'bar'}),
+            ('put', 'f', 'invalid data type'),
+            ('put', 'g', {'f:foo', 'bar'}),
+            (1, 'h', {'f:foo': 'bar'}),
+            ('put', 2, {'f:foo': 'bar'}),
+            ('put', 'j', 3),
+            ('invalid', 'k', {'f:foo': 'bar'}),
+            ('put', 'z', {'f:foo': 'bar'}),
+
+        ]
+        errors, results = self.table.batch(actions)
+        #self.assertEquals(errors, len(actions) - 2)
+        # TODO scan for the good rows
+        i = 0
+        for row_key, obj in self.table.scan():
+            print row_key, obj
+            i += 1
+
+        self.assertEquals(i, 2)
+
+
+    def test_mixed_errors_delete(self):
         raise NotImplementedError
+
+    def test_empty_actions(self):
+        errors, results = self.table.batch([])
+        self.assertEquals(errors, 0)
 
 
 if __name__ == '__main__':
@@ -274,6 +457,7 @@ table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractiv
 table.batch([('put', 'hello{}'.format(i), {'Name:bar':'bar{}'.format(i)}) for i in range(100000)])
 #table.scan()
 
+table.put('foo', {'f:bar': ''.join(['a' for _ in range(10000)])})
 
 import spam
 connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
@@ -291,12 +475,10 @@ CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
 
-class TestCTableRow(unittest.TestCase):
-def setUp(self):
 connection = _connection(CLDBS)
 connection.create_table(TABLE_NAME, {'f': {}})
 table = _table(connection, TABLE_NAME)
-table.put("foo", {"f:bar": "baz"})
+table.put("foo", {"f:bar", "baz"})
 
 def tearDown(self):
 try:
@@ -318,10 +500,86 @@ from spam import _connection, _table
 CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
 connection = _connection(CLDBS)
+connection.delete_table(TABLE_NAME)
 connection.create_table(TABLE_NAME, {'f': {}})
 table = _table(connection, TABLE_NAME)
-table.put("lol", {})
+table.put("test", {"f:foo": "bar"})
+table.row('test')
 
+"""
+
+"""
+from spam import _connection, _table
+CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
+connection = _connection(CLDBS)
+connection.delete_table(TABLE_NAME)
+connection.create_table(TABLE_NAME, {'f': {}})
+table = _table(connection, TABLE_NAME)
+connection.delete_table(TABLE_NAME)
+connection.create_table(TABLE_NAME, {'f': {}})
+table = _table(connection, TABLE_NAME)
+table.put("test", {"f:foo": "bar"})
+"""
+
+
+
+"""
+from spam import _connection, _table
+CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
+connection = _connection(CLDBS)
+#lol = {''.join(['a' for _ in range(5)]): {}}
+connection.delete_table(TABLE_NAME)
+connection.create_table(TABLE_NAME, {'f': {}})
+table = _table(connection, TABLE_NAME)
+
+actions = [
+    ('put', 'a', {'f:foo': 'bar'}),
+    ('put', 'c', {'f:': 'bar'}),
+    ('put', 'b', {'f:foo': 'bar'}),
+]
+table.batch(actions)
+
+# Odd, sometimes it segfaults, sometime count isn't updated and it hangs..
+
+"""
+
+"""
+from spam import _connection, _table
+CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
+connection = _connection(CLDBS)
+#lol = {''.join(['a' for _ in range(5)]): {}}
+connection.delete_table(TABLE_NAME)
+connection.create_table(TABLE_NAME, {''.join(['a' for _ in range(10000)]): {}})
+connection.create_table(TABLE_NAME, {'aaaaa': {}})
+#connection.create_table(TABLE_NAME, {'f': {}})
+
+from spam import _connection, _table
+CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
+connection = _connection(CLDBS)
+connection.delete_table(TABLE_NAME)
+connection.create_table(TABLE_NAME, {'f': {'max_versions': 1}})
+
+lol = TABLE_NAME + ''.join(['a' for _ in range(1000)])
+connection.create_table(lol, {'f': {}})
+
+
+table = _table(connection, TABLE_NAME)
+//table.put('foo', {'f:bar': ''.join(['a' for _ in range(10000)])})
+
+table.put(''.join(['a' for _ in range(10000)]), {'f:bar': 'baz'})
+
+table.put('foo', {'f:bar': ''.join(['a' for _ in range(10000)])})
+
+table.put('foo', {'f:' + ''.join(['a' for _ in range(10000)]): 'baz'})
+
+connection.create_table(TABLE_NAME, {''.join(['a' for _ in range(1000)]): {}})
+
+
+table.put('foo', {'f:' + ''.join(['a' for _ in range(10000)]): 'baz'})
 
 for i in range(1, 10):
     table.put("foo{i}".format(i=i), {"f:bar{i}".format(i=i): 'baz{i}'.format(i=i)})
