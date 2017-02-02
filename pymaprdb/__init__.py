@@ -1,4 +1,4 @@
-from pymaprdb import _connection, _table
+from pymaprdb import _connection, _table, HBaseError
 
 # TODO It would be cool to see if ld_library_path is set correctly?
 
@@ -71,6 +71,9 @@ class Batch(object):
             self.send()
 
     def send(self):
-        self.table._table.batch(self._actions)
+        try:
+            self.table._table.batch(self._actions)
+        except (HBaseError, MemoryError) as ex:
+            pass
         self._actions = []
 
