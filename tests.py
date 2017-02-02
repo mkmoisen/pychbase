@@ -108,6 +108,7 @@ class TestCConnectionManageTable(unittest.TestCase):
         self.assertRaises(ValueError, connection.create_table, TABLE_NAME, {'f': {'max_versions': 'foo',}})
         self.assertRaises(ValueError, connection.delete_table, TABLE_NAME)
         self.assertRaises(ValueError, connection.create_table, TABLE_NAME, {'f': {'max_versions': 10000000000000000000}})
+        self.assertRaises(ValueError, connection.create_table, TABLE_NAME, {'f': 'not a dict'})
 
     def test_invalid_key(self):
         connection = _connection(CLDBS)
@@ -201,9 +202,9 @@ class TestCTablePut(unittest.TestCase):
 
     def test_bad_colon_no_qualifier(self):
         # LOL Apparently this is totaly fine
-        self.assertRaises(ValueError, self.table.put, 'foo', {"f:": "baz"})
+        self.table.put('foo', {"f:": "baz"})
         row = self.table.row('foo')
-        self.assertEquals(row, {})
+        self.assertEquals(row, {"f:": "baz"})
 
     def test_invalid_column_family(self):
         self.assertRaises(ValueError, self.table.put, 'foo', {"f:bar": "baz", 'invalid:foo': 'bar'})
@@ -375,7 +376,6 @@ class TestCTableScanHappy(unittest.TestCase):
     def test_no_rows(self):
         i = 0
         for row_key, obj in self.table.scan('fake', 'fake~'):
-            print "WTF???", row_key, obj
             i += 1
 
         self.assertEquals(i, 0)
@@ -415,7 +415,7 @@ class TestCTableBatch(unittest.TestCase):
         actions = [
             ('put', 'a', {'f:foo': 'bar'}),
             ('put', 'b', {'f': 'bar'}),
-            ('put', 'c', {'f:': 'bar'}),
+            ('put', 'c', {'f:': 'bar'}), # This is legal
             ('put', 'd', {':foo': 'bar'}),
             ('put', 'e', {'invalid:foo': 'bar'}),
             ('put', 'f', 'invalid data type'),
@@ -423,19 +423,19 @@ class TestCTableBatch(unittest.TestCase):
             (1, 'h', {'f:foo': 'bar'}),
             ('put', 2, {'f:foo': 'bar'}),
             ('put', 'j', 3),
+            'not a tuple',
             ('invalid', 'k', {'f:foo': 'bar'}),
             ('put', 'z', {'f:foo': 'bar'}),
-
         ]
         errors, results = self.table.batch(actions)
-        #self.assertEquals(errors, len(actions) - 2)
+        self.assertEquals(errors, len(actions) - 3)
         # TODO scan for the good rows
         i = 0
         for row_key, obj in self.table.scan():
             print row_key, obj
             i += 1
 
-        self.assertEquals(i, 2)
+        self.assertEquals(i, 3)
 
 
     def test_mixed_errors_delete(self):

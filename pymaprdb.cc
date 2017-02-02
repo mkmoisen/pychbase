@@ -19,6 +19,36 @@
         }                                \
     } while (0);
 
+#define OOM_OBJ_RETURN_NULL(obj) \
+    do {                        \
+        if (!obj) {                 \
+            PyErr_SetString(PyExc_OSError, "Out of Memory"); \
+            return NULL; \
+        }   \
+    } while (0);
+
+#define OOM_OBJ_RETURN_ERRNO(obj) \
+    do {                        \
+        if (!obj) {                 \
+            PyErr_SetString(PyExc_OSError, "Out of Memory"); \
+            return 12; \
+        }   \
+    } while (0);
+
+#define OOM_ERRNO_RETURN_NULL(obj) \
+    do {                        \
+        if (obj == 12) {                 \
+            PyErr_SetString(PyExc_OSError, "Out of Memory"); \
+            return NULL; \
+        }   \
+    } while (0);
+
+#define OOM_ERRNO_RETURN_ERRNO(obj) \
+    do {                        \
+        if (obj == 12) {                 \
+            return 12; \
+        }   \
+    } while (0);
 
 static PyObject *SpamError;
 
@@ -318,10 +348,7 @@ static char *hbase_fqcolumn(const hb_cell_t *cell) {
 
     int family_len = cell->family_len;
     int qualifier_len = cell->qualifier_len;
-    printf("family_len is %i\n", family_len);
-    printf("family is %s\n", family);
-    printf("qualifier_len is %i\n", qualifier_len);
-    printf("qualifier is %s\n", qualifier);
+
 
     // +1 for null terminator, +1 for colon
     //TODO This one is probably correct
@@ -330,16 +357,13 @@ static char *hbase_fqcolumn(const hb_cell_t *cell) {
     if (!fq) {
         return NULL;
     }
+
     strncpy(fq, family, family_len);
-    printf("fq is %s\n", fq);
     fq[family_len] = ':';
-    printf("fq is %s\n", fq);
     fq[family_len + 1] = '\0';
-    //fq[strlen(family)] = '\0';
-    printf("fq is %s\n", fq);
     // strcat will replace the last null terminator before writing, then add a null terminator
     strncat(fq, qualifier, qualifier_len);
-    printf("fq is %s\n", fq);
+
     return fq;
 }
 
@@ -352,7 +376,6 @@ struct RowBuffer {
     }
 
     ~RowBuffer() {
-        //printf("RowBuffer Destructor\n");
         while (allocedBufs.size() > 0) {
             char *buf = allocedBufs.back();
             allocedBufs.pop_back();
@@ -463,14 +486,12 @@ static PyObject *Connection_open(Connection *self) {
     if (!self->is_open) {
         int err = 0;
         err = hb_connection_create(PyString_AsString(self->cldbs), NULL, &self->conn);
-        //printf("err hb_connection_create %i\n", err);
         if (err != 0) {
             PyErr_SetString(PyExc_ValueError, "Could not connect using CLDBS");
             return NULL;
         }
 
         err = hb_client_create(self->conn, &self->client);
-        //printf("err hb_client_create %i\n", err);
         if (err != 0) {
             PyErr_SetString(PyExc_ValueError, "Could not create client from connection");
             return NULL;
@@ -573,10 +594,8 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
     char *table_name;
     PyObject *dict;
     if (!PyArg_ParseTuple(args, "sO!", &table_name, &PyDict_Type, &dict)) {
-        printf("noob in parse tuple\n");
         return NULL;
     }
-    printf("dict ref count is %i\n",dict->ob_refcnt);
     if (!self->is_open) {
         Connection_open(self);
     }
@@ -585,21 +604,12 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
         PyErr_SetString(PyExc_ValueError, "Table name is too long\n");
         return NULL;
     }
-    printf("table name is %s\n", table_name);
-    printf("before admin table exists\n");
-    printf("strlen(table_name) is %i\n", strlen(table_name));
     err = hb_admin_table_exists(self->admin, NULL, table_name);
-    printf("after admin table exists\n");
     if (err == 0) {
         // I guess I have to return -1 nothing else to cause the correct failure
-        printf("we have err %i\n", err);
         PyErr_SetString(PyExc_ValueError, "Table already exists\n");
-
-        //return NULL; // return err;
-        printf("before return\n");
         return NULL;
     }
-    printf("no err\n");
 
     PyObject *column_family_name;
     PyObject *column_family_attributes;
@@ -616,47 +626,29 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
     int counter = 0;
 
     while (PyDict_Next(dict, &i, &column_family_name, &column_family_attributes)) {
-        printf("looping\n");
-        printf("dict ref count is %i\n",dict->ob_refcnt);
-        printf("column family name is %i\n",column_family_name->ob_refcnt);
-        printf("column_family_attributes is %i\n",column_family_attributes->ob_refcnt);
-        printf("before asstring family name create\n");
 
         char *column_family_name_char = PyString_AsString(column_family_name);
-        printf("column family name is %i\n",column_family_name->ob_refcnt);
-        if (!column_family_name_char) {
-            PyErr_SetString(PyExc_ValueError, "Out of memmory");
-            return NULL;
-        }
+        OOM_OBJ_RETURN_NULL(column_family_name_char);
 
-        printf("before coldesc create\n");
         err = hb_coldesc_create((byte_t *)column_family_name_char, strlen(column_family_name_char) + 1, &families[counter]);
-        printf("after coldesc create\n");
-        printf("column family name is %i\n",column_family_name->ob_refcnt);
-        printf("column_family_attributes is %i\n",column_family_attributes->ob_refcnt);
+
         if (err != 0) {
             PyErr_SetString(PyExc_ValueError, "Failed to create coldesc");
             return NULL;
         }
-        //printf("In loop name is %s\n", (char *)columndesc.family);
 
         //families[i] = columndesc;
 
-        int is_dict = PyDict_Check(column_family_attributes);
-        if (is_dict == 1) {
-            printf("Its a dict lol\n");
+        if (!PyDict_Check(column_family_attributes)) {
+            PyErr_SetString(PyExc_ValueError, "Attributes must be a dict");
+            return NULL;
+        };
 
-            Py_ssize_t dict_size = PyDict_Size(column_family_attributes);
-            printf("The size is %i\n", dict_size);
-        } else {
-            printf("Its NOT a dict lol\n");
-        }
+        //Py_ssize_t dict_size = PyDict_Size(column_family_attributes);
 
         PyObject *key, *value;
         Py_ssize_t o = 0;
         while (PyDict_Next(column_family_attributes, &o, &key, &value)) {
-            printf("Looping through attrs\n");
-
             if (!PyString_Check(key) && !PyUnicode_Check(key)) {
                 PyErr_SetString(PyExc_ValueError, "Key must be string");
                 return NULL;
@@ -666,20 +658,12 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
                 return NULL;
             }
             char *key_char = PyString_AsString(key);
-            printf("attribute is %s\n", key_char);
-            if (!key_char) {
-                PyErr_SetString(PyExc_ValueError, "Out of memmory");
-                return NULL;
-            }
+            OOM_OBJ_RETURN_NULL(key_char);
 
-            printf("after !key_char\n");
             if (strcmp(key_char, "max_versions") == 0) {
-                printf("It's max versions\n");
                 int max_versions = PyInt_AsSsize_t(value);
-                printf("in max versions its %i\n", max_versions);
                 // error check?
                 err = hb_coldesc_set_maxversions(families[counter], max_versions);
-                printf("After set max versions err is %i\n", err);
                 if (err != 0) {
                     PyErr_SetString(PyExc_ValueError, "Failed to add max version to column desc");
                     return NULL;
@@ -715,23 +699,16 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
         counter++;
     }
 
-    printf("before table create\n");
     err = hb_admin_table_create(self->admin, NULL, table_name, families, number_of_families);
-    printf("after table create\n");
-    printf("before if\n");
-
     if (err != 0) {
-        printf("Error != 0\n");
         if (err == 36) {
             PyErr_SetString(PyExc_ValueError, "Table name is too long\n");
         } else {
             PyErr_SetString(PyExc_ValueError, "Failed to admin table create");
         }
 
-        printf("returning null\n");
         // Sometimes if it fails to create, the table still gets created but doesn't work?
         // Attempt to delete it
-        printf("table name is %s\n", table_name);
         PyObject *table_name_obj = Py_BuildValue("(s)", table_name);
         if (table_name_obj) {
             Connection_delete_table(self, table_name_obj);
@@ -740,7 +717,6 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
         // TODO check err code for column family too big?
         // TODO test for really large table name?
     }
-    printf("after if not tru\n");
     Py_RETURN_NONE;
 }
 
@@ -893,9 +869,9 @@ struct BatchCallBackBuffer {
         errors = 0;
         mutex = PTHREAD_MUTEX_INITIALIZER;
     }
+
     ~BatchCallBackBuffer() {
         //delete call_back_buffers;
-        //printf("BatchCallBackBuffer destructor\n");
 
         while (call_back_buffers.size() > 0) {
             CallBackBuffer *buf = call_back_buffers.back();
@@ -906,7 +882,6 @@ struct BatchCallBackBuffer {
         }
         // doesn't work
         //free(call_back_buffers);
-        printf("After BatchCallBack desructors\n");
 
     }
 
@@ -1000,7 +975,7 @@ static int read_result(hb_result_t result, PyObject *dict) {
          // Do I need to error check this?
         hb_result_get_cell_at(result, i, &cell);
         if (!cell) {
-            printf("cell was null\n");
+            //printf("cell was null\n");
             return 12;
         }
 
@@ -1008,9 +983,9 @@ static int read_result(hb_result_t result, PyObject *dict) {
         char *value_cell = (char *) cell->value;
         char *value_char = (char *) malloc(1 + value_len);
         strncpy(value_char, value_cell, value_len);
-        printf("cell->value is %s value_char is %s value_len is %i strlen(value_char) is %i\n", value_cell, value_char, value_len, strlen(value_char));
         value_char[value_len] = '\0';
-        printf("cell->value is %s value_char is %s value_len is %i strlen(value_char) is %i\n", value_cell, value_char, value_len, strlen(value_char));
+
+        char *example = "Here is the null terminator: \0";
 
         // Set item steals the ref right? No need to INC/DEC?
         // No it doesn't https://docs.python.org/2/c-api/dict.html?highlight=pydict_setitem#c.PyDict_SetItem
@@ -1022,28 +997,27 @@ static int read_result(hb_result_t result, PyObject *dict) {
         char *fq = hbase_fqcolumn(cell);
 
         if (!fq) {
-            printf("fq was null\n");
+            //printf("fq was null\n");
             return 12;//ENOMEM Cannot allocate memory
         }
         PyObject *key = Py_BuildValue("s", fq);
         free(fq);
-        printf("after free fq\n");
         //PyObject *value = Py_BuildValue("s",(char *)cell->value);
         PyObject *value = Py_BuildValue("s", value_char);
         if (!key || !value) {
-            printf("key or value was null\n");
+            //printf("key or value was null\n");
             return 12; //ENOMEM Cannot allocate memory
         }
         free(value_char);
-        printf("keys ref count is %i\n", key->ob_refcnt);
+        //printf("keys ref count is %i\n", key->ob_refcnt);
         //PyDict_SetItem(dict, Py_BuildValue("s", hbase_fqcolumn((char *)cell->family, (char *)cell->qualifier)), Py_BuildValue("s",(char *)cell->value));
         err = PyDict_SetItem(dict, key, value);
         if (err != 0) {
-            printf("PyDict_SetItem failed\n");
+            //printf("PyDict_SetItem failed\n");
             // Is this check necessary?
             return err;
         }
-        printf("keys ref count after set item is %i\n", key->ob_refcnt);
+        //printf("keys ref count after set item is %i\n", key->ob_refcnt);
         // TODO Do I need to decref key and value?
 
     }
@@ -1063,7 +1037,7 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
     CallBackBuffer *call_back_buffer = (CallBackBuffer *) extra;
 
     if (err != 0) {
-        printf("MapR API failed in row callback %i\n", err);
+        //printf("MapR API failed in row callback %i\n", err);
         pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->err = err;
         call_back_buffer->count = 1;
@@ -1073,7 +1047,7 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
     //call_back_buffer->table->count = 1;
 
     if (!result) {
-        printf("result is null\n");
+        //printf("result is null\n");
         // Note that if there is no row for the rowkey, result is not NULL
         // I doubt err wouldn't be 0 if result is null
         pthread_mutex_lock(&call_back_buffer->mutex);
@@ -1092,7 +1066,7 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
     // Do I need to dec ref? I don't know, memory isn't increasing when i run this in a loop
     PyObject *dict = PyDict_New();
     if (!dict) {
-        printf("dict is null\n");
+        //printf("dict is null\n");
         pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->err = 12;
         call_back_buffer->count = 1;
@@ -1102,7 +1076,7 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
 
     err = read_result(result, dict);
     if (err != 0) {
-        printf("read result was %i", call_back_buffer->err);
+        //printf("read result was %i", call_back_buffer->err);
         pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->err = err;
         call_back_buffer->count = 1;
@@ -1318,7 +1292,7 @@ void put_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result
     CallBackBuffer *call_back_buffer = (CallBackBuffer *) extra;
 
     if (err != 0) {
-        printf("MapR API Failed on Put Callback %i\n", err);
+        //printf("MapR API Failed on Put Callback %i\n", err);
         pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->count = 1;
         call_back_buffer->err = err;
@@ -1481,7 +1455,7 @@ static int make_put(Table *self, RowBuffer *rowBuf, const char *row_key, PyObjec
         //printf("value ref count is %i\n", value->ob_refcnt);
         char *fq_char = PyString_AsString(fq);
         if (!fq_char or strlen(fq_char) == 0) {
-            printf("Null or empty fq\n");
+            //printf("Null or empty fq\n");
             return -1;
         }
         char *family = rowBuf->getBuffer(strlen(fq_char)); // Don't +1 for null terminator, because of colon
@@ -1490,57 +1464,35 @@ static int make_put(Table *self, RowBuffer *rowBuf, const char *row_key, PyObjec
         if (err != 0) {
             return err;
         }
-        //printf("family is %s\n", arr[0]);
-        //printf("qualifier is %s\n", arr[1]);
-        // TODO Have to make sure to free this memory lol
-        //char *family = rowBuf->getBuffer(1024);
-        //char *qualifier = rowBuf->getBuffer(1024);
+
         char *value_char = PyString_AsString(value);
         if (!value_char) {
-            printf("value_char is null in make_put\n");
+            //printf("value_char is null in make_put\n");
             return -1;
         }
-        //char *v = rowBuf->getBuffer(strlen(value_char) + 1);
+
         char *v = rowBuf->getBuffer(strlen(value_char));
 
-
-        //strcpy(family, arr[0]);
-        //strcpy(qualifier, arr[1]);
-        // delete [] arr;
         strcpy(v, value_char);
-        //free(arr); //this throws an error lol
 
-        //printf("family is %s\n", family);
-        //printf("qualifier is %s\n", qualifier);
-        //printf("v is %s\n", v);
-
-        //printf("creating dummy cell\n");
-        // How come I wasn't doing +1 on row key??
-        //create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family) + 1, qualifier, strlen(qualifier) + 1, v, strlen(v) + 1);
-        printf("strlen(family) is %i\n", strlen(family));
-        printf("strlen(qualifier) is %i\n", strlen(qualifier));
         create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family), qualifier, strlen(qualifier), v, strlen(v));
-        //printf("put add cell\n");
+
         err = hb_put_add_cell(*hb_put, cell);;
         CHECK_RC_RETURN(err);
         if (err != 0) {
             PyErr_SetString(PyExc_ValueError, "Could not add cell to put");
             return -1;
         }
-        //printf("put add cell error %i\n", err);
-        delete cell;
-        //printf("RC for put add cell was %i\n", err);
 
+        delete cell;
     }
 
-    //printf("hb_mutation set table\n");
     err = hb_mutation_set_table((hb_mutation_t)*hb_put, self->table_name, strlen(self->table_name));
     CHECK_RC_RETURN(err);
     if (err != 0) {
         PyErr_SetString(PyExc_ValueError, "Could not add cell to put");
         return err;
     }
-    //printf("RC for muttaion set table was %i\n", err);
 
     return err;
 }
@@ -1577,10 +1529,7 @@ static PyObject *Table_put(Table *self, PyObject *args) {
         return NULL;
     }
 
-
-    //self->count = 0;
     hb_client_flush(self->connection->client, client_flush_callback, NULL);
-    //printf("Waiting for all callbacks to return ...\n");
 
     //uint64_t locCount;
     //do {
@@ -1625,7 +1574,7 @@ static PyObject *Table_put(Table *self, PyObject *args) {
 
 void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t numResults, void *extra) {
     //printf("In sn_cb\n");
-    printf("In scan callback\n");
+    //printf("In scan callback\n");
 
     CallBackBuffer *call_back_buffer = (CallBackBuffer *) extra;
     if (err != 0) {
@@ -1666,7 +1615,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
             strncpy(key_char, (char *)key, keyLen);
             key_char[keyLen] = '\0';
 
-            printf("key is %s keyLen is %i key_char is %s\n", key, keyLen, key_char);
+            //printf("key is %s keyLen is %i key_char is %s\n", key, keyLen, key_char);
 
             //printf("Row: %s\t", (char *)key);
             // Do I need a null check?
@@ -1841,10 +1790,10 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
 
     // TODO I need to free this right
     PyObject *ret = call_back_buffer->ret;
-    printf("ret has ref count of %i\n", ret->ob_refcnt);
+    //printf("ret has ref count of %i\n", ret->ob_refcnt);
     err = call_back_buffer->err;
     delete call_back_buffer;
-    printf("after delete call back buffer has ref count of %i\n", ret->ob_refcnt);
+    //printf("after delete call back buffer has ref count of %i\n", ret->ob_refcnt);
     if (err == 0) {
         return ret;
     }
@@ -1859,8 +1808,7 @@ void delete_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_res
     CallBackBuffer *call_back_buffer = (CallBackBuffer *) extra;
 
     if (err != 0) {
-        printf("MapR API Failed on Delete Callback %i\n", err);
-        // TODO Do I need to aquire the lock
+        //printf("MapR API Failed on Delete Callback %i\n", err);
         pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->err = err;
         call_back_buffer->count = 1;
@@ -1959,7 +1907,7 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
         //PyErr_SetString(PyExc_ValueError, "Could not create delete");
         return NULL;
     }
-    printf("RC for muttaion set table was %i\n", err);
+    //printf("RC for muttaion set table was %i\n", err);
 
     RowBuffer *rowBuf = new RowBuffer();
     //CallBackBuffer *call_back_buffer = CallBackBuffer_create(self, rowBuf);
@@ -1971,11 +1919,11 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
         PyErr_SetString(PyExc_ValueError, "Could not send delete");
         return NULL;
     }
-    printf("RC for mutation send was %i\n", err);
+    //printf("RC for mutation send was %i\n", err);
 
     // Todo do I need to error check this?
     hb_client_flush(self->connection->client, client_flush_callback, NULL);
-    printf("Waiting for all callbacks to return ...\n");
+    //printf("Waiting for all callbacks to return ...\n");
 
     int wait = 0;
 
@@ -2283,7 +2231,7 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
         }
     }
 
-    printf("done with loop going to flush\n");
+    //printf("done with loop going to flush\n");
 
     long wait = 0;
 
@@ -2301,7 +2249,7 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
             PyErr_SetString(PyExc_ValueError, "Flush failed! Not sure if puts have been sent");
             return NULL;
         }
-        printf("Waiting for all callbacks to return ...\n");
+        //printf("Waiting for all callbacks to return ...\n");
 
 
         //while (self->count < number_of_actions) {
@@ -2342,7 +2290,7 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
     }
 
     delete batch_call_back_buffer;
-    printf("wait was %ld\n", wait);
+    //printf("wait was %ld\n", wait);
     PyObject *ret_tuple = Py_BuildValue("iO", errors, results);
     Py_DECREF(results);
     return ret_tuple;
