@@ -12,12 +12,6 @@
 #define __WINDOWS__
 #endif
 
-#define CHECK_RC_RETURN(rc)          \
-    do {                               \
-        if (rc) {                        \
-            printf("%s:%d Call failed: %d\n", __PRETTY_FUNCTION__, __LINE__, rc); \
-        }                                \
-    } while (0);
 
 #define OOM_OBJ_RETURN_NULL(obj) \
     do {                        \
@@ -467,7 +461,9 @@ static PyObject *Connection_open(Connection *self) {
     if (!self->is_open) {
         int err = 0;
         err = hb_connection_create(PyString_AsString(self->cldbs), NULL, &self->conn);
-        OOM_OBJ_RETURN_NULL(self->conn);
+        //OOM_OBJ_RETURN_NULL(self->conn);
+        // TODO Oh wow cldbs is null if the user provided string is invalid...
+        // I need to remove all the OOM checks then
         if (err != 0) {
             PyErr_Format(PyExc_ValueError, "Could not connect using CLDBS '%s': %i", self->cldbs, err);
             return NULL;
@@ -694,7 +690,7 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
         // Sometimes if it fails to create, the table still gets created but doesn't work?
         // Attempt to delete it
         PyObject *table_name_obj = Py_BuildValue("(s)", table_name);
-        OOM_ERRNO_RETURN_NULL(table_name_obj);
+        OOM_OBJ_RETURN_NULL(table_name_obj);
 
         // I don't care if this succeeds or not
         Connection_delete_table(self, table_name_obj);
@@ -1147,7 +1143,7 @@ void client_flush_callback(int32_t err, hb_client_t client, void *ctx) {
     // TODO should I add a buffer to *ctx anddo something with it
 }
 
-*/
+
 /*
 import spam
 connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
@@ -1385,7 +1381,7 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     OOM_OBJ_RETURN_NULL(call_back_buffer);
 
     hb_put_t hb_put;
-    err = make_put(self, rowBuf, row_key, dict, &hb_put);
+    err = make_put(self, row_buf, row_key, dict, &hb_put);
     OOM_OBJ_RETURN_NULL(hb_put);
     if (err != 0) {
         // This would just override the error message set in make_put
@@ -1770,7 +1766,7 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
 
 
     RowBuffer *row_buf = new RowBuffer();
-    OOM_OBJ_RETURN_NULL(rowBuf);
+    OOM_OBJ_RETURN_NULL(row_buf);
 
     CallBackBuffer *call_back_buffer = new CallBackBuffer(self, row_buf, NULL);
     OOM_OBJ_RETURN_NULL(call_back_buffer);
@@ -2162,118 +2158,6 @@ static PyTypeObject TableType = {
    PyType_GenericNew,                         /* tp_new */
 };
 
-/*
-struct Connection {
-    hb_connection_t conn;
-    hb_client_t client;
-    RowBuffer *rowBuf;
-
-    Connection() {
-        rowBuf = new RowBuffer();
-        int err = 0;
-        err = hb_connection_create(cldbs, NULL, &conn);
-        CHECK_RC_RETURN(err);
-
-        err = hb_client_create(conn, &client);
-        CHECK_RC_RETURN(err);
-    }
-
-    ~Connection() {
-        hb_client_destroy(client, cl_dsc_cb, rowBuf);
-        hb_connection_destroy(conn);
-    }
-
-};
-*/
-
-/*
-static void read_result(hb_result_t result) {
-    if (!result) {
-        return;
-    }
-
-    size_t cellCount = 0;
-    hb_result_get_cell_count(result, &cellCount);
-
-    for (size_t i = 0; i < cellCount; ++i) {
-        const hb_cell_t *cell;
-        hb_result_get_cell_at(result, i, &cell);
-        printf("%s:%s = %s\t", cell->family, cell->qualifier, cell->value);
-    }
-
-    if (cellCount == 0) {
-        printf("----- NO CELLS -----");
-    }
-}
-*/
-
-
-
-
-
-
-
-
-
-
-/*
-static PyObject *pymaprdb_get(Connection *connection,const char *table_name, char *row_key) {
-    printf("Inside pymaprdb_get\n");
-    //RowBuffer *rowBuf = new RowBuffer();
-    //char *rk = rowBuf->getBuffer(1024);
-    char *rk = connection->rowBuf->getBuffer(1024);
-    //char rk[1024];
-    // Both of those work^ I wonder why they use the row buffer?
-
-    //printf("Enter key to get: ");
-    //scanf("%s", rk);
-    strcpy(rk, row_key);
-    printf("In test_get after strcpy, rowkey is %s\n", connection->rowBuf->allocedBufs.back());
-
-
-    //hb_connection_t conn;
-    int err = 0;
-
-
-    //if (!user) {
-        //err = hb_connection_create(cldbs, NULL, &conn);
-        //CHECK_RC_RETURN(err);
-    //} else {
-    //    err = hb_connection_create_as_user(cldbs, NULL, user, &conn);
-    //    CHECK_RC_RETURN(err);
-    //}
-
-    //hb_client_t client;
-
-    //err = hb_client_create(conn, &client);
-    //CHECK_RC_RETURN(err);
-
-    hb_get_t get;
-    err = hb_get_create((const byte_t *)rk, strlen(rk) + 1, &get);
-    CHECK_RC_RETURN(err);
-
-    //err = hb_get_set_table(get, tableName, strlen(tableName));
-    err = hb_get_set_table(get, table_name, strlen(table_name));
-    CHECK_RC_RETURN(err);
-
-
-    count = 0;
-    //err = hb_get_send(client, get, get_send_cb, rowBuf);
-    err = hb_get_send(connection->client, get, get_send_cb, connection->rowBuf);
-    CHECK_RC_RETURN(err);
-
-    while (count != 1) { sleep(0.1); }
-
-    hb_client_destroy(connection->client, cl_dsc_cb, connection);
-
-    //sleep(1);
-    //hb_connection_destroy(conn);
-
-    printf("Done with test_get\n");
-    return connection->rowBuf->ret;
-}
-*/
-
 
 
 
@@ -2339,79 +2223,7 @@ import spam
 spam.scan()
 */
 
-/*
 
-
-static PyObject *scan(PyObject *self, PyObject *args) {
-    char *start = NULL;
-    char *stop = NULL;
-
-    RowBuffer *rowBuf = new RowBuffer();
-    rowBuf->rets = PyList_New(0);
-
-    if (!PyArg_ParseTuple(args, "|ss", &start, &stop)) {
-        return NULL;
-    }
-
-    hb_connection_t conn;
-    int err = 0;
-    err = hb_connection_create(cldbs, NULL, &conn);
-    CHECK_RC_RETURN(err);
-    printf("RC for conn create was %i\n", err);
-    hb_client_t client;
-    err = hb_client_create(conn, &client);
-    CHECK_RC_RETURN(err);
-    printf("RC for client create was %i\n", err);
-
-    hb_scanner_t scan;
-    err = hb_scanner_create(client, &scan);
-    CHECK_RC_RETURN(err);
-    printf("RC for scanner create was %i\n", err);
-
-    err = hb_scanner_set_table(scan, tableName, strlen(tableName));
-    CHECK_RC_RETURN(err);
-    printf("RC for set table was %i\n", err);
-
-    err = hb_scanner_set_num_versions(scan, 1);
-    CHECK_RC_RETURN(err);
-    printf("RC for num versions  was %i\n", err);
-
-    if (start) {
-        // Do I need strlen + 1 ?
-        err = hb_scanner_set_start_row(scan, (byte_t *) start, strlen(start));
-        CHECK_RC_RETURN(err);
-        printf("RC for start row  was %i\n", err);
-    }
-    if (stop) {
-        err = hb_scanner_set_end_row(scan, (byte_t *) stop, strlen(stop));
-        CHECK_RC_RETURN(err);
-        printf("RC for stop row  was %i\n", err);
-    }
-
-    // Does it optimize if I set this higher?
-    err = hb_scanner_set_num_max_rows(scan, 1);
-    CHECK_RC_RETURN(err);
-    printf("RC for set num max rows  was %i\n", err);
-
-    count = 0;
-    err = hb_scanner_next(scan, sn_cb, rowBuf);
-    CHECK_RC_RETURN(err);
-    printf("RC for scanner next  was %i\n", err);
-
-    while (count == 0) { sleep(0.1); }
-
-    err = hb_client_destroy(client, cl_dsc_cb, NULL);
-    CHECK_RC_RETURN(err);
-    printf("RC for client destroy  was %i\n", err);
-
-
-    err = hb_connection_destroy(conn);
-    CHECK_RC_RETURN(err);
-    printf("RC for connection destroy  was %i\n", err);
-
-    return rowBuf->rets;
-}
-*/
 
 static PyObject *build_int(PyObject *self, PyObject *args) {
     return Py_BuildValue("i", 123);
