@@ -1447,8 +1447,6 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     OOM_OBJ_RETURN_NULL(row_buf);
 
     CallBackBuffer *call_back_buffer = new CallBackBuffer(self, row_buf, NULL);
-    //OOM_OBJ_RETURN_NULL(call_back_buffer);
-    TEST_OOM_FOR_CALL_BACK(call_back_buffer, flag)
     if (!call_back_buffer) {
         delete row_buf;
         return PyErr_NoMemory();
@@ -1786,7 +1784,7 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
     err = hb_scanner_next(scan, scan_callback, call_back_buffer);
     if (err != 0) {
         PyErr_Format(HBaseError, "Scan failed: %i", err);
-        delete
+        // TODO do I need to delete anything ??
         return NULL;
     }
 
