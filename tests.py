@@ -1,6 +1,5 @@
 import unittest
-from pychbase import _connection, _table
-from pychbase import Connection, Table, Batch
+from pychbase import Connection, Table, Batch, _connection, _table
 
 # TODO lol I reimported _connection and _table once and it resulted in a segmentation fault?
 

@@ -151,8 +151,8 @@ static int Foo_init(Foo *self, PyObject *args, PyObject *kwargs) {
 }
 
 /*
-import spam
-spam.Foo('a','b',5)
+import pychbase
+pychbase.Foo('a','b',5)
 */
 
 
@@ -273,7 +273,7 @@ static PyMethodDef Foo_methods[] = {
 static PyTypeObject FooType = {
    PyObject_HEAD_INIT(NULL)
    0,                         /* ob_size */
-   "spam.Foo",               /* tp_name */
+   "pychbase.Foo",               /* tp_name */
    sizeof(Foo),         /* tp_basicsize */
    0,                         /* tp_itemsize */
    (destructor)Foo_dealloc, /* tp_dealloc */
@@ -389,8 +389,8 @@ struct RowBuffer {
 
 
 /*
-import spam
-connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+import pychbase
+connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
 connection.is_open()
 connection.open()
 connection.is_open()
@@ -446,8 +446,8 @@ static PyMemberDef Connection_members[] = {
 };
 
 /*
-import spam
-connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+import pychbase
+connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
 connection.is_open()
 connection.open()
 connection.is_open()
@@ -455,7 +455,7 @@ connection.close()
 connection.is_open()
 connection.close()
 
-connection = spam._connection("abc")
+connection = pychbase._connection("abc")
 connection.open()
 connection.is_open()
 connection.close()
@@ -463,7 +463,7 @@ connection.cldbs = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05
 connection.open()
 connection.is_open()
 
-table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
+table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
 */
 static PyObject *Connection_open(Connection *self) {
     if (!self->is_open) {
@@ -517,8 +517,8 @@ static PyObject *Connection_is_open(Connection *self) {
 
 
 /*
-import spam
-connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+import pychbase
+connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
 connection.open()
 connection.create_table("/app/SubscriptionBillingPlatform/testpymaprdb21", {'f1': {}})
 
@@ -708,8 +708,8 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
 
 
 /*
-import spam
-connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+import pychbase
+connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
 connection.open()
 for i in range(1,20):
     try:
@@ -736,7 +736,7 @@ static PyMethodDef Connection_methods[] = {
 static PyTypeObject ConnectionType = {
    PyObject_HEAD_INIT(NULL)
    0,                         /* ob_size */
-   "spam._connection",               /* tp_name */
+   "pychbase._connection",               /* tp_name */
    sizeof(Connection),         /* tp_basicsize */
    0,                         /* tp_itemsize */
    (destructor)Connection_dealloc, /* tp_dealloc */
@@ -776,11 +776,11 @@ static PyTypeObject ConnectionType = {
 };
 
 /*
-import spam
-connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+import pychbase
+connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
 connection.open()
 
-table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
+table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
 table.row('row-000')
 connection.close()
 table.row('row-000')
@@ -841,11 +841,11 @@ struct CallBackBuffer {
 };
 
 /*
-import spam
-connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+import pychbase
+connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
 connection.open()
 
-table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
+table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
 table.batch([], 10000)
 */
 struct BatchCallBackBuffer {
@@ -890,11 +890,11 @@ static void Table_dealloc(Table *self) {
 }
 
 /*
-import spam
-connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+import pychbase
+connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
 connection.open()
 
-table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteracasdfasdtive')
+table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testInteracasdfasdtive')
 */
 static int Table_init(Table *self, PyObject *args, PyObject *kwargs) {
     Connection *connection, *tmp;
@@ -1079,11 +1079,11 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
     hb_get_destroy(get);
 }
 /*
-import spam
-connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+import pychbase
+connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
 connection.open()
 
-table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
+table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
 table.row('hello')
 */
 
@@ -1091,11 +1091,11 @@ table.row('hello')
 This has a memory leak:
 top -b | grep python
 
-import spam
-connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+import pychbase
+connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
 connection.open()
 
-table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
+table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
 print table.table_name
 table.row('hello')
 print table.table_name
@@ -1177,11 +1177,11 @@ void client_flush_callback(int32_t err, hb_client_t client, void *ctx) {
 
 
 /*
-import spam
-connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+import pychbase
+connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
 connection.open()
 
-table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
+table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
 table.put("snoop", {"f:foo": "bar"})
 */
 // TODO Document this and change its name
@@ -1317,11 +1317,11 @@ static int create_dummy_cell(hb_cell_t **cell,
 
 
 /*
-import spam
-connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+import pychbase
+connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
 connection.open()
 
-table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
+table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
 table.put('snoop', {'Name:a':'a','Name:foo':'bar'})
 for i in range(1000000):
     table.put('snoop', {'Name:a':'a','Name:foo':'bar'})
@@ -1700,11 +1700,11 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
 }
 
 /*
-import spam
-connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+import pychbase
+connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
 connection.open()
 
-table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
+table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
 table.scan('hello', 'hello100~')
 */
 
@@ -1848,11 +1848,11 @@ void delete_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_res
 }
 
 /*
-import spam
-connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+import pychbase
+connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
 connection.open()
 
-table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
+table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
 table.row('hello1')
 table.delete('hello1')
 */
@@ -1949,20 +1949,20 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
 
 
 /*
-import spam
-connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+import pychbase
+connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
 connection.open()
 
-table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
+table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
 table.batch([('put', 'hello{}'.format(i), {'f:bar':'bar{}'.format(i)}) for i in range(100000)])
 #table.scan()
 
 
-import spam
-connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+import pychbase
+connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
 connection.open()
 
-table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
+table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
 table.batch([('delete', 'hello{}'.format(i), {'Name:bar':'bar{}'.format(i)}) for i in range(100000)])
 
 
@@ -2341,7 +2341,7 @@ static PyMethodDef Table_methods[] = {
 static PyTypeObject TableType = {
    PyObject_HEAD_INIT(NULL)
    0,                         /* ob_size */
-   "spam._table",               /* tp_name */
+   "pychbase._table",               /* tp_name */
    sizeof(Table),         /* tp_basicsize */
    0,                         /* tp_itemsize */
    (destructor)Table_dealloc, /* tp_dealloc */
@@ -2386,7 +2386,7 @@ static PyTypeObject TableType = {
 
 // The C function always has self and args
 // for Module functions, self is NULL; for a method, self is the object
-static PyObject *spam_system(PyObject *self, PyObject *args)
+static PyObject *pychbase_system(PyObject *self, PyObject *args)
 {
     const char *command;
     int sts;
@@ -2435,14 +2435,14 @@ static PyObject *get(PyObject *self, PyObject *args) {
 }
 */
 /*
-import spam
-spam.put('hai', {'Name:First': 'Matthew'})
+import pychbase
+pychbase.put('hai', {'Name:First': 'Matthew'})
 */
 
 
 /*
-import spam
-spam.scan()
+import pychbase
+pychbase.scan()
 */
 
 
@@ -2580,8 +2580,8 @@ static PyObject *print_list(PyObject *self, PyObject *args) {
 }
 
 /*
-import spam
-spam.print_list_t([('put', 'row1', {'a':'b'}), ('delete', 'row2')])
+import pychbase
+pychbase.print_list_t([('put', 'row1', {'a':'b'}), ('delete', 'row2')])
 */
 static PyObject *print_list_t(PyObject *self, PyObject *args) {
     //PyListObject seems to suck, it isn't accepted by PyList_Size for example
@@ -2614,8 +2614,8 @@ static PyObject *print_list_t(PyObject *self, PyObject *args) {
 
 /*
 import string
-import spam
-spam.print_list([c for c in string.letters])
+import pychbase
+pychbase.print_list([c for c in string.letters])
 */
 static PyObject *print_list_fast(PyObject *self, PyObject *args) {
     //http://effbot.org/zone/python-capi-sequences.htm
@@ -2649,15 +2649,15 @@ static PyObject *print_list_fast(PyObject *self, PyObject *args) {
 
 
 /*
-lol = spam.build_dict()
+lol = pychbase.build_dict()
 print lol
-spam.add_to_dict(lol, 'hai', 'bai')
+pychbase.add_to_dict(lol, 'hai', 'bai')
 
-lol = spam.
+lol = pychbase.
 
 
-import spam
-spam.super_dict('f', 'k1', 'v1', 'f2', 'k2', 'v2')
+import pychbase
+pychbase.super_dict('f', 'k1', 'v1', 'f2', 'k2', 'v2')
 
 */
 /*
@@ -2668,7 +2668,7 @@ static PyObject *foo(PyObject *self, PyObject *args) {
 */
 
 static PyMethodDef SpamMethods[] = {
-    {"system",  spam_system, METH_VARARGS, "Execute a shell command."},
+    {"system",  pychbase_system, METH_VARARGS, "Execute a shell command."},
     {"lol", lol, METH_VARARGS, "your a lol"},
     //{"get", get, METH_VARARGS, "gets a row given a rowkey"},
     //{"put", put, METH_VARARGS, "puts a row and dict"},
@@ -2689,11 +2689,11 @@ static PyMethodDef SpamMethods[] = {
 #define PyMODINIT_FUNC void
 #endif
 PyMODINIT_FUNC
-initspam(void)
+init_pychbase(void)
 {
     PyObject *m;
 
-    m = Py_InitModule("spam", SpamMethods);
+    m = Py_InitModule("_pychbase", SpamMethods);
     if (m == NULL) {
         return;
     }
@@ -2719,7 +2719,7 @@ initspam(void)
     PyModule_AddObject(m, "Foo", (PyObject *) &FooType);
 
     // Add the type to the module
-    // failing to add this tp_new will result in: TypeError: cannot create 'spam._connection' instances
+    // failing to add this tp_new will result in: TypeError: cannot create 'pychbase._connection' instances
     ConnectionType.tp_new = PyType_GenericNew;
     Py_INCREF(&ConnectionType);
     PyModule_AddObject(m, "_connection", (PyObject *) &ConnectionType);
@@ -2728,11 +2728,11 @@ initspam(void)
     Py_INCREF(&TableType);
     PyModule_AddObject(m, "_table", (PyObject *) &TableType);
 
-    SpamError = PyErr_NewException("spam.error", NULL, NULL);
+    SpamError = PyErr_NewException("pychbase.error", NULL, NULL);
     Py_INCREF(SpamError);
     PyModule_AddObject(m, "error", SpamError);
 
-    HBaseError = PyErr_NewException("spam.HBaseError", NULL, NULL);
+    HBaseError = PyErr_NewException("pychbase.HBaseError", NULL, NULL);
     Py_INCREF(HBaseError);
     PyModule_AddObject(m, "HBaseError", HBaseError);
 }
@@ -2747,5 +2747,5 @@ main(int argc, char *argv[])
     Py_Initialize();
 
 
-    initspam();
+    init_pychbase();
 }
