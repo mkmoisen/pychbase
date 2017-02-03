@@ -505,6 +505,7 @@ connection = _connection(CLDBS)
 connection.delete_table(TABLE_NAME)
 connection.create_table(TABLE_NAME, {'f': {}})
 table = _table(connection, TABLE_NAME)
+table.batch([('put', 'hello{}'.format(i), {'f:bar':'bar{}'.format(i)}) for i in range(100000)])
 table.put("test", {"f:foo": "bar"})
 table.row('test')
 table.delete('test')
@@ -537,6 +538,7 @@ for k, v in table.scan():
 
 
 """
+from datetime import datetime
 from spam import _connection, _table
 CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
@@ -544,6 +546,46 @@ connection = _connection(CLDBS)
 connection.delete_table(TABLE_NAME)
 connection.create_table(TABLE_NAME, {'f': {}})
 table = _table(connection, TABLE_NAME)
+s = datetime.now()
+table.batch([('put', 'hello{}'.format(i), {'f:bar':'bar{}'.format(i)}) for i in range(1000000)], True)
+e = datetime.now()
+print e - s
+
+
+
+from datetime import datetime
+from spam import _connection, _table
+CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
+connection = _connection(CLDBS)
+connection.delete_table(TABLE_NAME)
+connection.create_table(TABLE_NAME, {'f': {}})
+table = _table(connection, TABLE_NAME)
+lol = [('put', 'hello{}'.format(i), {'f:bar':'bar{}'.format(i)}) for i in range(1000000)]
+s = datetime.now()
+table.batch(lol, True)
+e = datetime.now()
+print e - s
+
+
+from datetime import datetime
+from spam import _connection, _table
+CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
+connection = _connection(CLDBS)
+connection.delete_table(TABLE_NAME)
+connection.create_table(TABLE_NAME, {'f': {}})
+table = _table(connection, TABLE_NAME)
+lol = [('put', 'hello{}'.format(i), {'f:lolaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa{}'.format(o): "baraaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa{}".format(o) for o in range(i, i + 11)}) for i in range(100000)]
+
+s = datetime.now()
+table.batch(lol, True)
+e = datetime.now()
+print e - s
+
+
+
+
 connection.delete_table(TABLE_NAME)
 connection.create_table(TABLE_NAME, {'f': {}})
 table = _table(connection, TABLE_NAME)

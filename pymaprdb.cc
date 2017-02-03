@@ -13,6 +13,14 @@
 #endif
 
 
+#define CHECK(A)      \
+    do {                \
+        if (!(A)) {     \
+            goto error; \
+        }               \
+    } while (0);
+
+
 #define OOM_OBJ_RETURN_NULL(obj) \
     do {                        \
         if (!obj) {                 \
@@ -821,7 +829,17 @@ struct CallBackBuffer {
         ret = NULL;
     }
     ~CallBackBuffer() {
-        delete rowBuf;
+        /*
+        // rowBuf is now being deleting inside the put/delete callbacks
+        // Note that the rowBuf must absolutely be deleted in all exit scenarios or else it will lead to a m
+        // memory leak because I have removed the deletion from this destructor
+        if (rowBuf) {
+            printf("rowBuf is not null, deleting it\n");
+            delete rowBuf;
+            printf("After delete rowBuf\n");
+        }
+        */
+
     }
 };
 
@@ -854,9 +872,11 @@ struct BatchCallBackBuffer {
         //delete call_back_buffers;
 
         while (call_back_buffers.size() > 0) {
-            CallBackBuffer *buf = call_back_buffers.back();
+            CallBackBuffer *call_back_buffer = call_back_buffers.back();
+            //pthread_mutex_lock(&buf->mutex);
             call_back_buffers.pop_back();
-            delete buf; // In row buffer destructor, its delete [] buf ...
+            delete call_back_buffer; // In row buffer destructor, its delete [] buf ...
+            //pthread_mutex_unlock(&buf->mutex);
             // doesn't work
             //free(buf);
         }
@@ -988,6 +1008,10 @@ static int read_result(hb_result_t result, PyObject *dict) {
 Make absolutely certain that the count is set to 1 in all possible exit scenarios
 Or else the calling function will hang.
 */
+/*
+* It's very important to delete the RowBuf in all possible cases in this call back
+* or else it will result in a memory leak
+*/
 static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_result_t result, void *extra) {
     // What should I do if this is null?
     // There is no way to set the count and it will just hang.
@@ -1000,6 +1024,7 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
         pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->err = err;
         call_back_buffer->count = 1;
+        delete call_back_buffer->rowBuf;
         pthread_mutex_unlock(&call_back_buffer->mutex);
         return;
     }
@@ -1010,6 +1035,7 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
         pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->err = 12;
         call_back_buffer->count = 1;
+        delete call_back_buffer->rowBuf;
         pthread_mutex_unlock(&call_back_buffer->mutex);
         return;
     }
@@ -1027,6 +1053,7 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
         pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->err = 12;
         call_back_buffer->count = 1;
+        delete call_back_buffer->rowBuf;
         pthread_mutex_unlock(&call_back_buffer->mutex);
         return;
     }
@@ -1037,6 +1064,7 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
         pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->err = err;
         call_back_buffer->count = 1;
+        delete call_back_buffer->rowBuf;
         pthread_mutex_unlock(&call_back_buffer->mutex);
         return;
     }
@@ -1044,6 +1072,7 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
     pthread_mutex_lock(&call_back_buffer->mutex);
     call_back_buffer->ret = dict;
     call_back_buffer->count = 1;
+    delete call_back_buffer->rowBuf;
     pthread_mutex_unlock(&call_back_buffer->mutex);
 
     hb_result_destroy(result);
@@ -1109,10 +1138,13 @@ static PyObject *Table_row(Table *self, PyObject *args) {
     OOM_OBJ_RETURN_NULL(row_buff);
 
     CallBackBuffer *call_back_buffer = new CallBackBuffer(self, row_buff, NULL);
+    // TODO delete this and add deelte row_buf
     OOM_OBJ_RETURN_NULL(call_back_buffer);
 
     err = hb_get_send(self->connection->client, get, row_callback, call_back_buffer);
     if (err != 0) {
+        delete row_buff;
+        delete call_back_buffer;
         PyErr_Format(HBaseError, "Could not send get: %i", err);
         return NULL;
     }
@@ -1190,10 +1222,21 @@ static int split(char *fq, char *family, char *qualifier) {
 
 
 
-
+/*
+* It's very important to delete the RowBuf in all possible cases in this call back
+* or else it will result in a memory leak
+*/
 void put_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result_t result, void *extra) {
     // TODO hb_mutation_set_bufferable
     /*
+
+    http://tsunanet.net/~tsuna/asynchbase/api/org/hbase/async/PutRequest.html#setBufferable(boolean)
+    Sets whether or not this RPC is can be buffered on the client side. The default is true.
+
+    Setting this to false bypasses the client-side buffering, which is used to send RPCs in batches for greater throughput, and causes this RPC to be sent directly to the server.
+
+    Parameters:
+    bufferable - Whether or not this RPC can be buffered (i.e. delayed) before being sent out to HBase.
 
      * Sets whether or not this RPC can be buffered on the client side.
      *
@@ -1218,6 +1261,7 @@ void put_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result
         pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->count = 1;
         call_back_buffer->err = err;
+        delete call_back_buffer->rowBuf;
         pthread_mutex_unlock(&call_back_buffer->mutex);
         if (call_back_buffer->batch_call_back_buffer) {
             pthread_mutex_lock(&call_back_buffer->batch_call_back_buffer->mutex);
@@ -1233,12 +1277,14 @@ void put_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result
 
     pthread_mutex_lock(&call_back_buffer->mutex);
     call_back_buffer->count = 1;
+    delete call_back_buffer->rowBuf;
     pthread_mutex_unlock(&call_back_buffer->mutex);
     if (call_back_buffer->batch_call_back_buffer) {
         pthread_mutex_lock(&call_back_buffer->batch_call_back_buffer->mutex);
         call_back_buffer->batch_call_back_buffer->count++;
         pthread_mutex_unlock(&call_back_buffer->batch_call_back_buffer->mutex);
     }
+
     hb_mutation_destroy(mutation);
 
 }
@@ -1286,12 +1332,15 @@ lol()
 
 // TODO Document error codes for user error
 // split returns -10 if no colon was found
-static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObject *dict, hb_put_t *hb_put) {
+
+static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObject *dict, hb_put_t *hb_put, bool is_bufferable) {
     int err;
+    //printf("in make put before oom checks\n");
     OOM_OBJ_RETURN_ERRNO(self);
     OOM_OBJ_RETURN_ERRNO(row_buf);
     OOM_OBJ_RETURN_ERRNO(row_key);
     OOM_OBJ_RETURN_ERRNO(dict);
+    //printf("after oom checks\n");
 
 
     int size = PyDict_Size(dict);
@@ -1312,16 +1361,20 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
     // https://docs.python.org/2/c-api/dict.html?highlight=pydict_next#c.PyDict_Next
     // This says PyDict_Next borrows references for key and value...
     while (PyDict_Next(dict, &pos, &fq, &value)) {
+        //printf("looping\n");
         // Its weird if I loop batch with 100000, the ref count is 100002 for value??
         //printf("value ref count is %i\n", value->ob_refcnt);
         char *fq_char = PyString_AsString(fq);
+
         OOM_OBJ_RETURN_ERRNO(fq_char);
         if (strlen(fq_char) == 0) {
             //printf("Null or empty fq\n");
             return -1;
         }
+
         char *family = row_buf->getBuffer(strlen(fq_char)); // Don't +1 for null terminator, because of colon
         OOM_OBJ_RETURN_ERRNO(family);
+
         char *qualifier = row_buf->getBuffer(strlen(fq_char)); // Don't +1 for null terminator, because of colon
         OOM_OBJ_RETURN_ERRNO(family);
 
@@ -1334,12 +1387,18 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
         OOM_OBJ_RETURN_ERRNO(value_char);
         // I suppose an empty string here is OK
 
-        char *v = row_buf->getBuffer(strlen(value_char));
-        OOM_OBJ_RETURN_ERRNO(v);
+        //char *v = row_buf->getBuffer(strlen(value_char));
+        //OOM_OBJ_RETURN_ERRNO(v);
 
-        strcpy(v, value_char);
+        // No errors when I replace v with value_char in create_dummy_cell..
+        // I'm under the impression I need to add the family and qualifier to some buffer until it successfully flushes
+        // Whereas value_char doesn't require this since its still being stored in memory via python..?
+        // Then in the call back can't I delete the buffer for family/qualifier?
+        //strcpy(v, value_char);
 
-        err = create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family), qualifier, strlen(qualifier), v, strlen(v));
+        //err = create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family), qualifier, strlen(qualifier), v, strlen(v));
+        //printf("before dummy cell\n");
+        err = create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family), qualifier, strlen(qualifier), value_char, strlen(value_char));
         OOM_ERRNO_RETURN_ERRNO(err);
         if (err != 0) {
             return err;
@@ -1353,7 +1412,7 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
 
         delete cell;
     }
-
+    //printf("done with loop setting table\n");
     err = hb_mutation_set_table((hb_mutation_t)*hb_put, self->table_name, strlen(self->table_name));
     if (err != 0) {
         // Is it dangerous to pass in self->table_name here if its null?
@@ -1361,6 +1420,16 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
         return err;
     }
 
+    // TODO BUFFERABILITY
+    err = hb_mutation_set_bufferable((hb_mutation_t)*hb_put, is_bufferable);
+    if (err != 0) {
+        // Is it dangerous to pass in self->table_name here if its null?
+        //PyErr_Format(PyExc_ValueError, "Could not put's table for '%s': %i", self->table_name, %i);
+        return err;
+    }
+
+
+    //printf("returning\n");
     return err;
 }
 
@@ -1378,12 +1447,30 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     OOM_OBJ_RETURN_NULL(row_buf);
 
     CallBackBuffer *call_back_buffer = new CallBackBuffer(self, row_buf, NULL);
-    OOM_OBJ_RETURN_NULL(call_back_buffer);
+    //OOM_OBJ_RETURN_NULL(call_back_buffer);
+    TEST_OOM_FOR_CALL_BACK(call_back_buffer, flag)
+    if (!call_back_buffer) {
+        delete row_buf;
+        return PyErr_NoMemory();
+    }
 
     hb_put_t hb_put;
-    err = make_put(self, row_buf, row_key, dict, &hb_put);
-    OOM_OBJ_RETURN_NULL(hb_put);
+    //printf("before make put\n");
+    // TODO activate is bufferable
+    err = make_put(self, row_buf, row_key, dict, &hb_put, true);
+    //printf("after make put checking if hb_put is null\n");
+    if (!hb_put) {
+        //printf("hb_put is null\n");
+        delete row_buf;
+        delete call_back_buffer;
+        //printf("before return\n");
+        return PyErr_NoMemory();
+    }
+    //printf("after hb_put check\n");
+    //OOM_OBJ_RETURN_NULL(hb_put);
     if (err != 0) {
+        delete row_buf;
+        delete call_back_buffer;
         // This would just override the error message set in make_put
         // PyErr_SetString(PyExc_ValueError, "Could not create put oh noo");
         // TODO A cool feature would be to let the user specify column families (since the API doesn't let me figure it out)
@@ -1404,15 +1491,48 @@ static PyObject *Table_put(Table *self, PyObject *args) {
         return NULL;
     }
 
+    //printf("before mutation send\n");
+    // https://github.com/mapr/libhbase/blob/0ddda015113452955ed600116f58a47eebe3b24a/src/main/native/jni_impl/hbase_client.cc#L151
+    // https://github.com/mapr/libhbase/blob/0ddda015113452955ed600116f58a47eebe3b24a/src/main/native/jni_impl/hbase_client.cc#L151
+    // https://github.com/mapr/libhbase/blob/0ddda015113452955ed600116f58a47eebe3b24a/src/main/native/jni_impl/hbase_client.cc#L268
+    // https://github.com/mapr/libhbase/blob/0ddda015113452955ed600116f58a47eebe3b24a/src/main/native/jni_impl/jnihelper.h#L73
+    // It looks like the following happens:
+    // If I submit a null client or hb_put, hb_mutation invokes the call back BUT sets the errno
+    //      Then the result of hb_mutation_send is actually a 0!
+    //
+    // I suppose the only time hb_mutation_send returns non-0 is if there is an issue in JNI_GET_ENV
+    //      This issue would prevent the sendGet from ever happening, as well as the callback
+    // So a non-0 means that the call back has not been invoked and its safe to delete rowbuf?
+    //
+    // Ya so if err is not 0, call back has not been invoked, and its safe/necessary to delete row_buf
     err = hb_mutation_send(self->connection->client, (hb_mutation_t)hb_put, put_callback, call_back_buffer);
     if (err != 0) {
+        delete row_buf;
+        delete call_back_buffer;
         PyErr_Format(HBaseError, "Put failed to send: %i", err);
         return NULL;
     }
+    //printf("after mutation send\n");
 
+    /*
+    If client is null, flush will still invoke the callback and set the errno in call back
+    Same as wet mutation_send/get_send, the only time an error is returned if the JNI ENV couldn't be set
+    and its guarenteed that the flush won't execute the call back
+    ... however, since the mutation_send in the above step was successful, doesn't this imply that I
+    cannot delete row_buf here?
+
+    oh ok one major subetly to be aware of:
+        If hb_mutation buffering is OFF, the above hb_mutation MAY OR MAY NOT have sent
+        if hb_mutation buffering is ON, I dont think the above hb_mutation will have sent
+
+    Actually, it appears that the buffering doesn't work or that there is something I'm missing.
+    If I set buffering on or not, it still ends up being sent before the flush?
+    */
     err = hb_client_flush(self->connection->client, client_flush_callback, NULL);
     if (err != 0) {
+        delete call_back_buffer;
         PyErr_Format(HBaseError, "Put failed to flush: %i", err);
+        return NULL;
     }
 
     //uint64_t locCount;
@@ -1427,10 +1547,14 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     while (call_back_buffer->count != 1) {
         sleep(0.1);
     }
+    //printf("after wait\n");
 
     err = call_back_buffer->err;
-    delete call_back_buffer;
+    //printf("after call err\n");
 
+    //printf("after delete rowbuf\n");
+    delete call_back_buffer;
+    //printf("after deletes\n");
     if (err != 0) {
         if (err == 2) {
             PyErr_Format(PyExc_ValueError, "Put failed; probably bad column family: %i", err);
@@ -1444,6 +1568,9 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
+/*
+* Remember to delete the rowBuf in all possible exit cases or else it will leak memory
+*/
 void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t numResults, void *extra) {
     // TODO I think its better to segfault to prevent hanging
     CallBackBuffer *call_back_buffer = (CallBackBuffer *) extra;
@@ -1452,6 +1579,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
         pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->err = err;
         call_back_buffer->count = 1;
+        delete call_back_buffer->rowBuf;
         pthread_mutex_unlock(&call_back_buffer->mutex);
         return;
     }
@@ -1459,6 +1587,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
         pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->err = 12;
         call_back_buffer->count = 1;
+        delete call_back_buffer->rowBuf;
         pthread_mutex_unlock(&call_back_buffer->mutex);
         return;
     }
@@ -1476,6 +1605,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 pthread_mutex_lock(&call_back_buffer->mutex);
                 call_back_buffer->err = err;
                 call_back_buffer->count = 1;
+                delete call_back_buffer->rowBuf;
                 pthread_mutex_unlock(&call_back_buffer->mutex);
                 return;
             }
@@ -1488,6 +1618,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 pthread_mutex_lock(&call_back_buffer->mutex);
                 call_back_buffer->err = 12;
                 call_back_buffer->count = 1;
+                delete call_back_buffer->rowBuf;
                 pthread_mutex_unlock(&call_back_buffer->mutex);
                 return;
             }
@@ -1497,6 +1628,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 pthread_mutex_lock(&call_back_buffer->mutex);
                 call_back_buffer->err = err;
                 call_back_buffer->count = 1;
+                delete call_back_buffer->rowBuf;
                 pthread_mutex_unlock(&call_back_buffer->mutex);
                 Py_DECREF(dict);
                 // TODO If I decref this will i seg fault if i access it later?
@@ -1520,6 +1652,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 pthread_mutex_lock(&call_back_buffer->mutex);
                 call_back_buffer->err = 12;
                 call_back_buffer->count = 1;
+                delete call_back_buffer->rowBuf;
                 pthread_mutex_unlock(&call_back_buffer->mutex);
                 Py_DECREF(dict);
                 return;
@@ -1530,6 +1663,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 pthread_mutex_lock(&call_back_buffer->mutex);
                 call_back_buffer->err = err;
                 call_back_buffer->count = 1;
+                delete call_back_buffer->rowBuf;
                 pthread_mutex_unlock(&call_back_buffer->mutex);
                 Py_DECREF(dict);
                 Py_DECREF(tuple);
@@ -1553,6 +1687,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
             pthread_mutex_lock(&call_back_buffer->mutex);
             call_back_buffer->err = err;
             call_back_buffer->count = 1;
+            delete call_back_buffer->rowBuf;
             pthread_mutex_unlock(&call_back_buffer->mutex);
             return;
         }
@@ -1561,6 +1696,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
         // TODO Is it necessary to aquire the lock here? Isn't there only going to be one thread on this?
         pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->count = 1;
+        delete call_back_buffer->rowBuf;
         pthread_mutex_unlock(&call_back_buffer->mutex);
     }
 }
@@ -1639,15 +1775,18 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
     OOM_OBJ_RETURN_NULL(row_buf);
 
     CallBackBuffer *call_back_buffer = new CallBackBuffer(self, row_buf, NULL);
+    // TODO replace this and delete row_buf
     OOM_OBJ_RETURN_NULL(call_back_buffer);
 
     call_back_buffer->ret = PyList_New(0);
+    // TODO replcae this and delete call_back_buffer
     OOM_OBJ_RETURN_NULL(call_back_buffer->ret);
 
 
     err = hb_scanner_next(scan, scan_callback, call_back_buffer);
     if (err != 0) {
         PyErr_Format(HBaseError, "Scan failed: %i", err);
+        delete
         return NULL;
     }
 
@@ -1670,6 +1809,10 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
     return ret;
 }
 
+/*
+* It's very important to delete the RowBuf in all possible cases in this call back
+* or else it will result in a memory leak
+*/
 void delete_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result_t result, void *extra) {
     // It looks like result is always NULL for delete?
 
@@ -1680,6 +1823,7 @@ void delete_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_res
         pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->err = err;
         call_back_buffer->count = 1;
+        delete call_back_buffer->rowBuf;
         pthread_mutex_unlock(&call_back_buffer->mutex);
 
         if (call_back_buffer->batch_call_back_buffer) {
@@ -1694,6 +1838,7 @@ void delete_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_res
 
     pthread_mutex_lock(&call_back_buffer->mutex);
     call_back_buffer->count = 1;
+    delete call_back_buffer->rowBuf;
     pthread_mutex_unlock(&call_back_buffer->mutex);
 
     if (call_back_buffer->batch_call_back_buffer) {
@@ -1730,6 +1875,7 @@ static int make_delete(Table *self, char *row_key, hb_delete_t *hb_delete) {
     if (err != 0) {
         return err;
     }
+    OOM_OBJ_RETURN_ERRNO(hb_delete);
 
     err = hb_mutation_set_table((hb_mutation_t)*hb_delete, self->table_name, strlen(self->table_name));
     if (err != 0) {
@@ -1760,26 +1906,31 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
             PyErr_SetString(PyExc_ValueError, "row_key was empty string");
             return NULL;
         } else {
-            PyErr_Format(PyExc_ValueError, "Failed to create Delete or set it's Table: %i", err);
+            PyErr_Format(PyExc_ValueError, "Failed to create Delete with rowkey '%s' or set it's Table with '%s': %i", row_key, self->table_name, err);
         }
     }
 
-
+    // I'm not even using the row_buf for deletes
     RowBuffer *row_buf = new RowBuffer();
     OOM_OBJ_RETURN_NULL(row_buf);
 
     CallBackBuffer *call_back_buffer = new CallBackBuffer(self, row_buf, NULL);
+    // TODO replace this and delete row_buf
     OOM_OBJ_RETURN_NULL(call_back_buffer);
 
     err = hb_mutation_send(self->connection->client, (hb_mutation_t)hb_delete, delete_callback, call_back_buffer);
     if (err != 0) {
+        delete row_buf;
+        delete call_back_buffer;
         PyErr_SetString(HBaseError, "Delete failed to send and may not have succeeded");
         return NULL;
     }
 
     err = hb_client_flush(self->connection->client, client_flush_callback, NULL);
     if (err != 0) {
+        delete call_back_buffer;
         PyErr_SetString(HBaseError, "Delete failed to flush and may not have succeeded");
+        return NULL;
     }
 
     while (call_back_buffer->count != 1) {
@@ -1805,7 +1956,7 @@ connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdn
 connection.open()
 
 table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
-table.batch([('put', 'hello{}'.format(i), {'Name:bar':'bar{}'.format(i)}) for i in range(100000)])
+table.batch([('put', 'hello{}'.format(i), {'f:bar':'bar{}'.format(i)}) for i in range(100000)])
 #table.scan()
 
 
@@ -1827,9 +1978,18 @@ table.batch([('delete', 'hello{}'.format(i)) for i in range(100000)])
 
 static PyObject *Table_batch(Table *self, PyObject *args) {
     PyObject *actions;
+    PyObject *is_bufferable = NULL;
 
-    if (!PyArg_ParseTuple(args, "O!", &PyList_Type, &actions)) {
+    if (!PyArg_ParseTuple(args, "O!|O!", &PyList_Type, &actions, &PyBool_Type, &is_bufferable)) {
         return NULL;
+    }
+
+    bool is_bufferable_bool = true;
+
+    if (!is_bufferable) {
+        if (!PyObject_IsTrue(is_bufferable)) {
+            is_bufferable_bool = false;
+        }
     }
 
     int err;
@@ -1846,7 +2006,6 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
     OOM_OBJ_RETURN_NULL(batch_call_back_buffer);
 
     for (i = 0; i < number_of_actions; i++) {
-        printf("i is %i, errors is %i\n", i, batch_call_back_buffer->errors);
         RowBuffer *rowBuf = new RowBuffer();
         if (!rowBuf) {
             pthread_mutex_lock(&batch_call_back_buffer->mutex);
@@ -1862,6 +2021,9 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
             batch_call_back_buffer->errors++;
             batch_call_back_buffer->count++;
             pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+
+            delete rowBuf;
+
             continue;
         }
 
@@ -1877,6 +2039,9 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
             call_back_buffer->count++;
             call_back_buffer->err = 12;
+
+            delete rowBuf;
+
             continue;
         }
 
@@ -1888,6 +2053,9 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
             call_back_buffer->count++;
             call_back_buffer->err = -1; //TODO BETTER
+
+            delete rowBuf;
+
             continue;
         }
 
@@ -1901,6 +2069,9 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
             call_back_buffer->count++;
             call_back_buffer->err = 12;
+
+            delete rowBuf;
+
             continue;
         }
         //if (!PyString_Check(mutation_type) && !PyUnicode_Check(mutation_type)) {
@@ -1912,6 +2083,9 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
             call_back_buffer->count++;
             call_back_buffer->err = -1; //TODO BETTER
+
+            delete rowBuf;
+
             continue;
         }
         char *mutation_type_char = PyString_AsString(mutation_type);
@@ -1924,6 +2098,9 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
             call_back_buffer->count++;
             call_back_buffer->err = 12;
+
+            delete rowBuf;
+
             continue;
         }
 
@@ -1937,6 +2114,9 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
             call_back_buffer->count++;
             call_back_buffer->err = 12;
+
+            delete rowBuf;
+
             continue;
         }
 
@@ -1949,6 +2129,9 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
             call_back_buffer->count++;
             call_back_buffer->err = -1; //TODO BETTER
+
+            delete rowBuf;
+
             continue;
         }
 
@@ -1963,6 +2146,9 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
             call_back_buffer->count++;
             call_back_buffer->err = 12;
+
+            delete rowBuf;
+
             continue;
         }
 
@@ -1980,6 +2166,9 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
                 call_back_buffer->count++;
                 call_back_buffer->err = 12;
+
+                delete rowBuf;
+
                 continue;
             }
             if (!PyDict_Check(dict)) {
@@ -1990,12 +2179,15 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
                 call_back_buffer->count++;
                 call_back_buffer->err = -1;
+
+                delete rowBuf;
+
                 continue;
             }
 
             // do I need to increment dict?
             hb_put_t hb_put;
-            err = make_put(self, rowBuf, row_key_char, dict, &hb_put);
+            err = make_put(self, rowBuf, row_key_char, dict, &hb_put, is_bufferable_bool);
             //printf("dict ref count after make put %i\n", dict->ob_refcnt);
             if (err != 0) {
                 pthread_mutex_lock(&batch_call_back_buffer->mutex);
@@ -2005,7 +2197,13 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
                 call_back_buffer->count++;
                 call_back_buffer->err = err;
+
+                delete rowBuf;
+
+                continue;
             }
+            // The only time hb_mutation_send results in non-zero means the call back has NOT been invoked
+            // So its safe to delete rowBuf
             err = hb_mutation_send(self->connection->client, (hb_mutation_t)hb_put, put_callback, call_back_buffer);
             //printf("dict ref count after send %i\n", dict->ob_refcnt);
             // TODO ADD the hb_put to the call back buffer and free it!
@@ -2019,8 +2217,12 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
                 call_back_buffer->count++;
                 if (call_back_buffer->err == 0) {
                     call_back_buffer->err = err;
+
+                    delete rowBuf;
                 }
                 pthread_mutex_unlock(&call_back_buffer->mutex);
+
+                continue;
             }
 
         } else if (strcmp(mutation_type_char, "delete") == 0) {
@@ -2034,6 +2236,10 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
                 call_back_buffer->count++;
                 call_back_buffer->err = err;
+
+                delete rowBuf;
+
+                continue;
             }
             err = hb_mutation_send(self->connection->client, (hb_mutation_t)hb_delete, delete_callback, call_back_buffer);
             if (err != 0) {
@@ -2046,8 +2252,12 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
                 call_back_buffer->count++;
                 if (call_back_buffer->err == 0) {
                     call_back_buffer->err = err;
+
+                    delete rowBuf;
                 }
                 pthread_mutex_unlock(&call_back_buffer->mutex);
+
+                continue;
             }
         } else {
             // Must be put or delete
@@ -2058,6 +2268,10 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
             call_back_buffer->count++;
             call_back_buffer->err = -1; //TODO BETTER
+
+            delete rowBuf;
+
+            continue;
         }
     }
 
@@ -2069,8 +2283,15 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
         // TODO Oh no ... The docs say:
         // TODO Note that this doesn't guarantee that ALL outstanding RPCs have completed.
         // TODO Need to figure out the implications of this...
+        //printf("SLEEPING FOR 10 BEFORE FLUSH\n");
+        //sleep(10);
+        //printf("before flush\n");
         err = hb_client_flush(self->connection->client, client_flush_callback, NULL);
+        //printf("after flush, SLEEPING FOR 10\n");
+        //sleep(10);
+        //printf("after sleep\n");
         if (err != 0) {
+            //printf("we have errors\n");
             // The documentation doesn't specify if this would ever return an error or why.
             // If this fails with an error and the call back is never invoked, my script would hang..
             // I'll temporarily raise an error until I can clarify this
@@ -2081,6 +2302,7 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
 
         //while (self->count < number_of_actions) {
+        // TODO do I need to lock this?
         while (batch_call_back_buffer->count < number_of_actions) {
             // TODO this sleep should be optimized based on the number of actions?
             // E.g. perhaps at most 1 full second is OK if the number of actions is large enough?
@@ -2095,7 +2317,9 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
         // TODO I should really go through and get the results and give them back to user
     }
 
+    //printf("Before delete batch_call_back_buffer\n");
     delete batch_call_back_buffer;
+    //printf("after delete batch_call_back_buffer\n");
     //printf("wait was %ld\n", wait);
     PyObject *ret_tuple = Py_BuildValue("iO", errors, results);
     OOM_OBJ_RETURN_NULL(ret_tuple);
