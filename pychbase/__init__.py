@@ -1,27 +1,33 @@
-from pymaprdb import _connection, _table, HBaseError
+from pychbase import _connection, _table, HBaseError
 
 # TODO It would be cool to see if ld_library_path is set correctly?
 
 class Connection(object):
-    def __init__(self, cldbs):
+    def __init__(self, cldbs=None):
+        if cldbs is None:
+            cldbs = self._extract_cldbs()
+
         self.cldbs = cldbs
         self._connection = _connection(cldbs)
         self._connection.open()
+
+    def _extract_cldbs(self):
+        raise NotImplementedError
 
     def table(self, table_name):
         return Table(self, table_name)
 
     def __enter__(self):
-        pass
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
 
     def create_table(self, table_name, column_families):
-        pass
+        self._connection.create_table(table_name, column_families)
 
     def close(self):
-        pass
+        self._connection.close()
 
 
 class Table(object):
@@ -44,6 +50,14 @@ class Table(object):
         # TODO Add filters
         for k, v in self._table.scan(start, stop):
             yield k, v
+
+    def delete_prefix(self, rowkey_prefix):
+        batch = self.batch()
+        for row_key, obj in self.scan(rowkey_prefix, rowkey_prefix + '~'):
+            batch.delete(row_key)
+
+        batch.send()
+
 
     def close(self):
         self.connection.close()
@@ -71,9 +85,6 @@ class Batch(object):
             self.send()
 
     def send(self):
-        try:
-            self.table._table.batch(self._actions)
-        except (HBaseError, MemoryError) as ex:
-            pass
+        self.table._table.batch(self._actions)
         self._actions = []
 

@@ -469,13 +469,11 @@ static PyObject *Connection_open(Connection *self) {
     if (!self->is_open) {
         int err = 0;
         err = hb_connection_create(PyString_AsString(self->cldbs), NULL, &self->conn);
-        //OOM_OBJ_RETURN_NULL(self->conn);
-        // TODO Oh wow cldbs is null if the user provided string is invalid...
-        // I need to remove all the OOM checks then
         if (err != 0) {
             PyErr_Format(PyExc_ValueError, "Could not connect using CLDBS '%s': %i", self->cldbs, err);
             return NULL;
         }
+        OOM_OBJ_RETURN_NULL(self->conn);
 
         err = hb_client_create(self->conn, &self->client);
         OOM_OBJ_RETURN_NULL(self->client);
@@ -562,7 +560,6 @@ static PyObject *Connection_delete_table(Connection *self, PyObject *args) {
     }
 
     err = hb_admin_table_delete(self->admin, name_space, table_name);
-
     if (err != 0) {
         PyErr_SetString(HBaseError, "Failed to delete table");
         return NULL;
@@ -913,7 +910,6 @@ static int Table_init(Table *self, PyObject *args, PyObject *kwargs) {
 
     //int err = hb_admin_table_exists(self->connection->admin, NULL, self->table_name);
     int err = hb_admin_table_exists(connection->admin, NULL, table_name);
-
     if (err != 0) {
         // Apparently in INIT methods I have to return -1, NOT NULL or else it won't work properly
         PyErr_Format(PyExc_ValueError, "Table '%s' does not exist", table_name);
@@ -978,15 +974,19 @@ static int read_result(hb_result_t result, PyObject *dict) {
         char *fq = hbase_fqcolumn(cell);
         if (!fq) {
             free(value_char);
-            return 12;
+            return 12; //ENOMEM Cannot allocate memory
         }
 
         PyObject *key = Py_BuildValue("s", fq);
         free(fq);
+        if (!key) {
+            free(value_char);
+            return 12; //ENOMEM Cannot allocate memory
+        }
 
         PyObject *value = Py_BuildValue("s", value_char);
         free(value_char);
-        if (!key || !value) {
+        if (!value) {
             return 12; //ENOMEM Cannot allocate memory
         }
 

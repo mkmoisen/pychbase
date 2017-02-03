@@ -1,6 +1,6 @@
 import unittest
-#from pymaprdb import Connection, Table, Batch
-from spam import _connection, _table
+from pychbase import _connection, _table
+from pychbase import Connection, Table, Batch
 
 # TODO lol I reimported _connection and _table once and it resulted in a segmentation fault?
 
@@ -444,6 +444,74 @@ class TestCTableBatch(unittest.TestCase):
     def test_empty_actions(self):
         errors, results = self.table.batch([])
         self.assertEquals(errors, 0)
+
+
+class TestPython(unittest.TestCase):
+    def setUp(self):
+        pass
+
+    def tearDown(self):
+        pass
+
+    def test_happy(self):
+        connection = Connection(CLDBS)
+        connection.create_table(TABLE_NAME, {'f': {}})
+        table = connection.table(TABLE_NAME)
+        for i in range(0, 10):
+            table.put("a{}".format(i), {"f:foo{}".format(i): "bar".format(i)})
+
+        self.assertEquals(table.row("a0"), {"f:foo0": "bar0"})
+        self.assertEquals(table.row("a4"), {"f:foo0": "bar4"})
+        self.assertEquals(table.row("a9"), {"f:foo0": "bar9"})
+
+        i = 0
+        for row_key, obj in table.scan():
+            self.assertEquals(row_key, 'a{}'.format(i))
+            self.assertEquals(obj, {"f:foo{}".format(i): "bar{}".format(i)})
+            i += 1
+
+        self.assertEquals(i, 9)
+
+        i = 1
+        for row_key, obj in table.scan(start="a1"):
+            self.assertEquals(row_key, 'a{}'.format(i))
+            self.assertEquals(obj, {"f:foo{}".format(i): "bar{}".format(i)})
+            i += 1
+
+        self.assertEquals(i, 10)
+
+        i = 0
+        for row_key, obj in table.scan(stop="a8~"):
+            self.assertEquals(row_key, 'a{}'.format(i))
+            self.assertEquals(obj, {"f:foo{}".format(i): "bar{}".format(i)})
+            i += 1
+
+        self.assertEquals(i, 9)
+
+        i = 1
+        for row_key, obj in table.scan(start="a1", stop="a8~"):
+            self.assertEquals(row_key, 'a{}'.format(i))
+            self.assertEquals(obj, {"f:foo{}".format(i): "bar{}".format(i)})
+            i += 1
+
+        self.assertEquals(i, 9)
+
+        table.delete("a0")
+        table.delete("a9")
+        self.assertEquals("a0", {})
+        self.assertEquals("a9", {})
+
+        batch = table.batch()
+        for i in range(1000):
+            batch.put("test{}".format(i), {"f:foo{}".format(i): "bar{}".format(i)})
+
+        i = 0
+        for row_key, obj in table.scan(start='test', stop='test~'):
+            i += 1
+
+        self.assertEquals(i, 1000)
+
+
 
 
 if __name__ == '__main__':
