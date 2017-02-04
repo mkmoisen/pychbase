@@ -1245,6 +1245,7 @@ static int split(char *fq, char *family, char *qualifier) {
     // Initialize family to length, + 1 for null pointer, - 1 for the colon
     bool found_colon = false;
 
+    // this should either be strlen(fq) - 1, or strlen(fq) without the fq[i] != '\0' right?
     for (i = 0; i < strlen(fq) && fq[i] != '\0'; i++) {
         if (fq[i] != ':') {
             family[i] = fq[i];
@@ -1253,11 +1254,12 @@ static int split(char *fq, char *family, char *qualifier) {
             break;
         }
     }
-    family[i] = '\0';
 
     if (!found_colon) {
         return -10;
     }
+
+    family[i] = '\0';
 
     // This works with strlen(..) + 1 or without + 1 ... why ??
     int qualifier_index = 0;
@@ -1440,18 +1442,18 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
         OOM_OBJ_RETURN_ERRNO(value_char);
         // I suppose an empty string here is OK
 
-        char *v = row_buf->getBuffer(strlen(value_char));
-        OOM_OBJ_RETURN_ERRNO(v);
+        //char *v = row_buf->getBuffer(strlen(value_char));
+        //OOM_OBJ_RETURN_ERRNO(v);
 
         // No errors when I replace v with value_char in create_dummy_cell..
         // I'm under the impression I need to add the family and qualifier to some buffer until it successfully flushes
         // Whereas value_char doesn't require this since its still being stored in memory via python..?
         // Then in the call back can't I delete the buffer for family/qualifier?
-        strcpy(v, value_char);
+        //strcpy(v, value_char);
 
-        err = create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family), qualifier, strlen(qualifier), v, strlen(v));
+        //err = create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family), qualifier, strlen(qualifier), v, strlen(v));
         //printf("before dummy cell\n");
-        //err = create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family), qualifier, strlen(qualifier), value_char, strlen(value_char));
+        err = create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family), qualifier, strlen(qualifier), value_char, strlen(value_char));
         OOM_ERRNO_RETURN_ERRNO(err);
         if (err != 0) {
             return err;
@@ -1508,7 +1510,7 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     //printf("before make put\n");
     // TODO activate is bufferable
     err = make_put(self, row_buf, row_key, dict, &hb_put, true);
-    OOM_OBJ_RETURN_NULL(hb_put);
+    //OOM_OBJ_RETURN_NULL(hb_put);
     /*
     if (!hb_put) {
         //printf("hb_put is null\n");
@@ -1597,7 +1599,11 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     //} while (locCount < numRows);
 
     // TODO Do I need to aquire the lock on this?
-    while (call_back_buffer->count != 1) {
+    int local_count = 0;
+    while (local_count != 1) {
+        pthread_mutex_lock(&call_back_buffer->mutex);
+        local_count = call_back_buffer->count;
+        pthread_mutex_unlock(&call_back_buffer->mutex);
         sleep(0.1);
     }
     //printf("after wait\n");
@@ -1681,7 +1687,10 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 return;
             }
 
+            // I cannot imagine this lock being necessary
+            //pthread_mutex_lock(&call_back_buffer->mutex);
             err = read_result(results[r], dict);
+            //pthread_mutex_unlock(&call_back_buffer->mutex);
             if (err != 0) {
                 pthread_mutex_lock(&call_back_buffer->mutex);
                 call_back_buffer->err = err;
@@ -1716,7 +1725,11 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 return;
             }
 
+            // I can't imagine this lock being necessary
+            // However the helgrind report went from 24000 lines to 3500 after adding it?
+            pthread_mutex_lock(&call_back_buffer->mutex);
             err = PyList_Append(call_back_buffer->ret, tuple);
+            pthread_mutex_unlock(&call_back_buffer->mutex);
             if (err != 0) {
                 pthread_mutex_lock(&call_back_buffer->mutex);
                 call_back_buffer->err = err;
@@ -1738,7 +1751,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
         }
         // The API doesn't specify when the return value would not be 0
         // But it is used in this unittest:
-        // https://github.com/mapr/libhbase/blob/0ddda015113452955ed600116f58a47eebe3b24a/src/test/native/unittests/libhbaseutil.cc#L760
+        // https://github.com/mapr/libhbase/blob/0ddda015113452955ed600116f58a47eebe3b24a/src/test/native/unittests/libhbaseutil.cc#L760 // Valgrind shows a possible data race write of size 1 by one thread to a previous write of size 1 by a different thread, both on the following line...// I cannot lock this though right?
         err = hb_scanner_next(scan, scan_callback, call_back_buffer);
         if (err != 0) {
             //PyErr_SetString(PyExc_ValueError, "Failed in scanner callback");
@@ -1848,8 +1861,12 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
         // TODO do I need to delete anything ??
         return NULL;
     }
-
-    while (call_back_buffer->count != 1) {
+    int local_count = 0;
+    //while (call_back_buffer->count != 1) {
+    while (local_count != 1) {
+        pthread_mutex_lock(&call_back_buffer->mutex);
+        local_count = call_back_buffer->count;
+        pthread_mutex_unlock(&call_back_buffer->mutex);
         sleep(0.1);
     }
 
@@ -1899,7 +1916,7 @@ void delete_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_res
     call_back_buffer->count = 1;
     delete call_back_buffer->rowBuf;
     pthread_mutex_unlock(&call_back_buffer->mutex);
-
+    // Uhm should I do this call_back_buffer->batch_call_back_buffer within a lock?
     if (call_back_buffer->batch_call_back_buffer) {
         pthread_mutex_lock(&call_back_buffer->batch_call_back_buffer->mutex);
         call_back_buffer->batch_call_back_buffer->count++;
@@ -1991,8 +2008,12 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
         PyErr_SetString(HBaseError, "Delete failed to flush and may not have succeeded");
         return NULL;
     }
-
-    while (call_back_buffer->count != 1) {
+    // TODO do I need to lock this?
+    int local_count = 0;
+    while (local_count != 1) {
+        pthread_mutex_lock(&call_back_buffer->mutex);
+        local_count = call_back_buffer->count;
+        pthread_mutex_unlock(&call_back_buffer->mutex);
         sleep(0.1);
     }
 
@@ -2366,7 +2387,12 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
         //while (self->count < number_of_actions) {
         // TODO do I need to lock this?
-        while (batch_call_back_buffer->count < number_of_actions) {
+        int local_count = 0;
+        //while (batch_call_back_buffer->count < number_of_actions) {
+        while (local_count < number_of_actions) {
+            pthread_mutex_lock(&batch_call_back_buffer->mutex);
+            local_count = batch_call_back_buffer->count;
+            pthread_mutex_unlock(&batch_call_back_buffer->mutex);
             // TODO this sleep should be optimized based on the number of actions?
             // E.g. perhaps at most 1 full second is OK if the number of actions is large enough?
             sleep(0.1);

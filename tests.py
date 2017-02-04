@@ -234,11 +234,11 @@ class TestCTablePut(unittest.TestCase):
 
     def test_big_value(self):
         ## Greater than 1024
-        raise NotImplementedError
-        #self.table.put('foo', {'f:bar': ''.join(['a' for _ in range(10000)])})
-        #row = self.table.row('foo')
-        #self.assertEquals(row, {'f:bar': ''.join(['a' for _ in range(10000)])})
-    """
+        #raise NotImplementedError
+        self.table.put('foo', {'f:bar': ''.join(['a' for _ in range(10000)])})
+        row = self.table.row('foo')
+        self.assertEquals(row, {'f:bar': ''.join(['a' for _ in range(10000)])})
+
     def test_big_qualifier(self):
         ## Greater than 1024
         print "before self.table.put"
@@ -251,7 +251,7 @@ class TestCTablePut(unittest.TestCase):
         row = self.table.row('foo')
         print "after row"
         self.assertEquals(row, {'f:' + ''.join(['a' for _ in range(10000)]): 'baz'})
-    """
+
 
     def test_big_row_key(self):
         ## Greater than 1024
@@ -280,26 +280,30 @@ class TestCTablePutSplit(unittest.TestCase):
         self.connection.close()
 
     def test_first(self):
+        print "test_first**********************************************************************************"
         self.connection.create_table(TABLE_NAME, {'f': {}})
         self.table = _table(self.connection, TABLE_NAME)
-        #print "before table.put"
-        #self.table.put("a", {"f:{cq}".format(cq='f' * i): str(i) for i in range(100)})
-        #row = self.table.row("a")
-        #self.assertEquals(row, {"f:{cq}".format(cq='f' * i): str(i) for i in range(100)})
+        print "before table.put****************************************************************************"
+        self.table.put("a", {"f:{cq}".format(cq='f' * i): str(i) for i in range(100)})
+        print "before table.put****************************************************************************"
+        row = self.table.row("a")
+        self.assertEquals(row, {"f:{cq}".format(cq='f' * i): str(i) for i in range(100)})
 
     def test_second(self):
+        print "test_second"
         self.connection.create_table(TABLE_NAME, {'ff': {}})
         self.table = _table(self.connection, TABLE_NAME)
-        #self.table.put("a", {"ff:{cq}".format(cq='f' * i): str(i) for i in range(100)})
-        #row = self.table.row("a")
-        #self.assertEquals(row, {"ff:{cq}".format(cq='f' * i): str(i) for i in range(100)})
+        self.table.put("a", {"ff:{cq}".format(cq='f' * i): str(i) for i in range(100)})
+        row = self.table.row("a")
+        self.assertEquals(row, {"ff:{cq}".format(cq='f' * i): str(i) for i in range(100)})
 
     def test_third(self):
+        print "test_third"
         self.connection.create_table(TABLE_NAME, {'fff': {}})
         self.table = _table(self.connection, TABLE_NAME)
-        #self.table.put("a", {"fff:{cq}".format(cq='f' * i): str(i) for i in range(100)})
-        #row = self.table.row("a")
-        #self.assertEquals(row, {"fff:{cq}".format(cq='f' * i): str(i) for i in range(100)})
+        self.table.put("a", {"fff:{cq}".format(cq='f' * i): str(i) for i in range(100)})
+        row = self.table.row("a")
+        self.assertEquals(row, {"fff:{cq}".format(cq='f' * i): str(i) for i in range(100)})
 
 
 # START HERE
