@@ -172,13 +172,20 @@ class TestCTableRow(unittest.TestCase):
 
 class TestCTablePut(unittest.TestCase):
     def setUp(self):
+        print "setUp"
         self.connection = _connection(CLDBS)
+        print "after connection()"
         self.connection.create_table(TABLE_NAME, {'f': {}})
+        print "after create table"
         self.table = _table(self.connection, TABLE_NAME)
+        print "after _table"
 
     def tearDown(self):
+        print "tearDown"
         self.connection.delete_table(TABLE_NAME)
+        print "after delete_table"
         self.connection.close()
+        print "after connection.close()"
 
     def test_happy(self):
         self.table.put("foo", {"f:bar": "baz"})
@@ -233,8 +240,15 @@ class TestCTablePut(unittest.TestCase):
 
     def test_big_qualifier(self):
         ## Greater than 1024
+        print "before self.table.put"
         self.table.put('foo', {'f:' + ''.join(['a' for _ in range(10000)]): 'baz'})
+        print "after self.table.put"
+        print "table is"
+        print self.table
+        print "after self.table"
+        print self.table.table_name
         row = self.table.row('foo')
+        print "after row"
         self.assertEquals(row, {'f:' + ''.join(['a' for _ in range(10000)]): 'baz'})
 
     def test_big_row_key(self):
@@ -518,25 +532,25 @@ if __name__ == '__main__':
 
 """
 
-import spam
-connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+import _pychbase
+connection = _pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
 connection.open()
 
-table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
+table = _pychbase._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
 table.batch([('put', 'hello{}'.format(i), {'Name:bar':'bar{}'.format(i)}) for i in range(100000)])
 #table.scan()
 
 table.put('foo', {'f:bar': ''.join(['a' for _ in range(10000)])})
 
-import spam
-connection = spam._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+import _pychbase
+connection = _pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
 connection.open()
 
-table = spam._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
+table = _pychbase._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
 table.batch([('delete', 'hello{}'.format(i), {'Name:bar':'bar{}'.format(i)}) for i in range(100000)])
 
 
-from spam import _connection, _table
+from _pychbase import _connection, _table
 
 # TODO lol I reimported _connection and _table once and it resulted in a segmentation fault?
 
@@ -565,14 +579,14 @@ self.assertEquals(row, {'f:bar': "baz"})
 
 
 """
-from spam import _connection, _table
+from _pychbase import _connection, _table
 CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
 connection = _connection(CLDBS)
 connection.delete_table(TABLE_NAME)
 connection.create_table(TABLE_NAME, {'f': {}})
 table = _table(connection, TABLE_NAME)
-table.batch([('put', 'hello{}'.format(i), {'f:bar':'bar{}'.format(i)}) for i in range(100000)])
+table.batch([('put', 'hello{}'.format(i), {'f:bar':'bar{}'.format(i)}) for i in range(100)])
 table.put("test", {"f:foo": "bar"})
 table.row('test')
 table.delete('test')
@@ -580,8 +594,47 @@ table.row('test')
 
 """
 
+
+
+# TODO WEIRD SEGFUALT
 """
-from spam import _connection, _table
+from _pychbase import _connection, _table
+CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
+connection = _connection(CLDBS)
+connection.delete_table(TABLE_NAME)
+connection.create_table(TABLE_NAME, {'f': {}})
+table = _table(connection, TABLE_NAME)
+connection.delete_table(TABLE_NAME)
+connection.create_table(TABLE_NAME, {'f': {}})
+table = _table(connection, TABLE_NAME)
+connection.delete_table(TABLE_NAME) # fails here
+
+
+from _pychbase import _connection, _table
+CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
+connection = _connection(CLDBS)
+connection.delete_table(TABLE_NAME)
+connection.create_table(TABLE_NAME, {'f': {}})
+table = _table(connection, TABLE_NAME)
+connection.delete_table(TABLE_NAME)
+connection.create_table(TABLE_NAME, {'f': {}})
+table = _table(connection, TABLE_NAME)
+connection.delete_table(TABLE_NAME) # fails here
+
+
+connection.delete_table(TABLE_NAME)
+connection.create_table(TABLE_NAME, {'f': {}})
+table = _table(connection, TABLE_NAME)
+table.put("test", {"f:foo": "bar"})
+"""
+
+
+
+
+"""
+from _pychbase import _connection, _table
 CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
 connection = _connection(CLDBS)
@@ -606,7 +659,7 @@ for k, v in table.scan():
 
 """
 from datetime import datetime
-from spam import _connection, _table
+from _pychbase import _connection, _table
 CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
 connection = _connection(CLDBS)
@@ -621,7 +674,7 @@ print e - s
 
 
 from datetime import datetime
-from spam import _connection, _table
+from _pychbase import _connection, _table
 CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
 connection = _connection(CLDBS)
@@ -636,7 +689,7 @@ print e - s
 
 
 from datetime import datetime
-from spam import _connection, _table
+from _pychbase import _connection, _table
 CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
 connection = _connection(CLDBS)
@@ -662,7 +715,7 @@ table.put("test", {"f:foo": "bar"})
 
 
 """
-from spam import _connection, _table
+from _pychbase import _connection, _table
 CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
 connection = _connection(CLDBS)
@@ -683,7 +736,7 @@ table.batch(actions)
 """
 
 """
-from spam import _connection, _table
+from _pychbase import _connection, _table
 CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
 connection = _connection(CLDBS)
@@ -693,7 +746,7 @@ connection.create_table(TABLE_NAME, {''.join(['a' for _ in range(10000)]): {}})
 connection.create_table(TABLE_NAME, {'aaaaa': {}})
 #connection.create_table(TABLE_NAME, {'f': {}})
 
-from spam import _connection, _table
+from _pychbase import _connection, _table
 CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
 connection = _connection(CLDBS)
