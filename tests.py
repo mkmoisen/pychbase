@@ -284,26 +284,26 @@ class TestCTablePutSplit(unittest.TestCase):
         self.connection.create_table(TABLE_NAME, {'f': {}})
         self.table = _table(self.connection, TABLE_NAME)
         print "before table.put****************************************************************************"
-        self.table.put("a", {"f:{cq}".format(cq='f' * i): str(i) for i in range(100)})
+        self.table.put("a", {"f:{cq}".format(cq='f' * i): str(i) for i in range(1000)})
         print "before table.put****************************************************************************"
         row = self.table.row("a")
-        self.assertEquals(row, {"f:{cq}".format(cq='f' * i): str(i) for i in range(100)})
+        self.assertEquals(row, {"f:{cq}".format(cq='f' * i): str(i) for i in range(1000)})
 
     def test_second(self):
         print "test_second"
         self.connection.create_table(TABLE_NAME, {'ff': {}})
         self.table = _table(self.connection, TABLE_NAME)
-        self.table.put("a", {"ff:{cq}".format(cq='f' * i): str(i) for i in range(100)})
+        self.table.put("a", {"ff:{cq}".format(cq='f' * i): str(i) for i in range(1000)})
         row = self.table.row("a")
-        self.assertEquals(row, {"ff:{cq}".format(cq='f' * i): str(i) for i in range(100)})
+        self.assertEquals(row, {"ff:{cq}".format(cq='f' * i): str(i) for i in range(1000)})
 
     def test_third(self):
         print "test_third"
         self.connection.create_table(TABLE_NAME, {'fff': {}})
         self.table = _table(self.connection, TABLE_NAME)
-        self.table.put("a", {"fff:{cq}".format(cq='f' * i): str(i) for i in range(100)})
+        self.table.put("a", {"fff:{cq}".format(cq='f' * i): str(i) for i in range(1000)})
         row = self.table.row("a")
-        self.assertEquals(row, {"fff:{cq}".format(cq='f' * i): str(i) for i in range(100)})
+        self.assertEquals(row, {"fff:{cq}".format(cq='f' * i): str(i) for i in range(1000)})
 
 
 # START HERE

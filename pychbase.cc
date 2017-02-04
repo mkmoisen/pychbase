@@ -1190,16 +1190,11 @@ static PyObject *Table_row(Table *self, PyObject *args) {
     //printf("before wait\n");
     //sleep(5);
     // TODO Do I need to lock this?
-    int local_count = 0;
+    uint64_t local_count = 0;
     //while (call_back_buffer->count != 1) {
-    printf("address is %p\n", call_back_buffer);
     while (local_count != 1) {
-        //printf("hai lol");
         pthread_mutex_lock(&call_back_buffer->mutex);
-        //printf("got lock\n");
-        //printf("address is %p\n", call_back_buffer);
         local_count = call_back_buffer->count;
-        //printf("local_count is %i\n", local_count);
         pthread_mutex_unlock(&call_back_buffer->mutex);
         sleep(0.1);
     }
@@ -1316,13 +1311,13 @@ void put_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result
         call_back_buffer->count = 1;
         call_back_buffer->err = err;
         delete call_back_buffer->rowBuf;
-        pthread_mutex_unlock(&call_back_buffer->mutex);
         if (call_back_buffer->batch_call_back_buffer) {
             pthread_mutex_lock(&call_back_buffer->batch_call_back_buffer->mutex);
             call_back_buffer->batch_call_back_buffer->errors++;
             call_back_buffer->batch_call_back_buffer->count++;
             pthread_mutex_unlock(&call_back_buffer->batch_call_back_buffer->mutex);
         }
+        pthread_mutex_unlock(&call_back_buffer->mutex);
         return;
     }
 
@@ -1333,12 +1328,12 @@ void put_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result
     call_back_buffer->count = 1;
     // TODO If I comment this the seg fault goes away ...
     delete call_back_buffer->rowBuf;
-    pthread_mutex_unlock(&call_back_buffer->mutex);
     if (call_back_buffer->batch_call_back_buffer) {
         pthread_mutex_lock(&call_back_buffer->batch_call_back_buffer->mutex);
         call_back_buffer->batch_call_back_buffer->count++;
         pthread_mutex_unlock(&call_back_buffer->batch_call_back_buffer->mutex);
     }
+    pthread_mutex_unlock(&call_back_buffer->mutex);
 
     hb_mutation_destroy(mutation);
 
@@ -1599,8 +1594,10 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     //} while (locCount < numRows);
 
     // TODO Do I need to aquire the lock on this?
-    int local_count = 0;
+    // Yes I do this fixed the seg fault! I wonder why..
+    uint64_t local_count = 0;
     while (local_count != 1) {
+    //while (call_back_buffer->count != 1) {
         pthread_mutex_lock(&call_back_buffer->mutex);
         local_count = call_back_buffer->count;
         pthread_mutex_unlock(&call_back_buffer->mutex);
@@ -1861,7 +1858,7 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
         // TODO do I need to delete anything ??
         return NULL;
     }
-    int local_count = 0;
+    uint64_t local_count = 0;
     //while (call_back_buffer->count != 1) {
     while (local_count != 1) {
         pthread_mutex_lock(&call_back_buffer->mutex);
@@ -1900,7 +1897,7 @@ void delete_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_res
         call_back_buffer->err = err;
         call_back_buffer->count = 1;
         delete call_back_buffer->rowBuf;
-        pthread_mutex_unlock(&call_back_buffer->mutex);
+
 
         if (call_back_buffer->batch_call_back_buffer) {
             pthread_mutex_lock(&call_back_buffer->batch_call_back_buffer->mutex);
@@ -1908,6 +1905,7 @@ void delete_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_res
             call_back_buffer->batch_call_back_buffer->count++;
             pthread_mutex_unlock(&call_back_buffer->batch_call_back_buffer->mutex);
         }
+        pthread_mutex_unlock(&call_back_buffer->mutex);
 
         return;
     }
@@ -1915,13 +1913,14 @@ void delete_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_res
     pthread_mutex_lock(&call_back_buffer->mutex);
     call_back_buffer->count = 1;
     delete call_back_buffer->rowBuf;
-    pthread_mutex_unlock(&call_back_buffer->mutex);
-    // Uhm should I do this call_back_buffer->batch_call_back_buffer within a lock?
     if (call_back_buffer->batch_call_back_buffer) {
         pthread_mutex_lock(&call_back_buffer->batch_call_back_buffer->mutex);
         call_back_buffer->batch_call_back_buffer->count++;
         pthread_mutex_unlock(&call_back_buffer->batch_call_back_buffer->mutex);
     }
+    pthread_mutex_unlock(&call_back_buffer->mutex);
+    
+    hb_mutation_destroy(mutation);
 
 }
 
@@ -2009,7 +2008,7 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
         return NULL;
     }
     // TODO do I need to lock this?
-    int local_count = 0;
+    uint64_t local_count = 0;
     while (local_count != 1) {
         pthread_mutex_lock(&call_back_buffer->mutex);
         local_count = call_back_buffer->count;
@@ -2387,7 +2386,7 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
         //while (self->count < number_of_actions) {
         // TODO do I need to lock this?
-        int local_count = 0;
+        uint64_t local_count = 0;
         //while (batch_call_back_buffer->count < number_of_actions) {
         while (local_count < number_of_actions) {
             pthread_mutex_lock(&batch_call_back_buffer->mutex);
