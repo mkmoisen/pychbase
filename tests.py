@@ -172,27 +172,49 @@ class TestCTableRow(unittest.TestCase):
 
 class TestCTablePut(unittest.TestCase):
     def setUp(self):
-        print "setUp"
         self.connection = _connection(CLDBS)
-        print "after connection()"
         self.connection.create_table(TABLE_NAME, {'f': {}})
-        print "after create table"
         self.table = _table(self.connection, TABLE_NAME)
-        print "after _table"
 
     def tearDown(self):
-        print "tearDown"
         self.connection.delete_table(TABLE_NAME)
-        print "after delete_table"
         self.connection.close()
-        print "after connection.close()"
 
     def test_happy(self):
         self.table.put("foo", {"f:bar": "baz"})
         row = self.table.row('foo')
-        for _ in range(10):
+        for _ in range(100):
             # Loop to check for buffer overflow error
             self.assertEquals(row, {'f:bar': "baz"})
+
+    def test_input_with_null(self):
+        self.table.put("foo", {"f:bar\0": "baz\0"})
+        row = self.table.row('foo')
+        self.assertEquals(row, {"f:bar\0": "baz\0"})
+
+        self.table.put("bar", {"f:bar\0baz": "baz\0foo"})
+        row = self.table.row('bar')
+        self.assertEquals(row, {"f:bar\0baz": "baz\0foo"})
+
+        self.table.put("bar\0", {"f:bar\0baz": "baz\0foo"})
+        row = self.table.row('bar\0')
+        self.assertEquals(row, {"f:bar\0baz": "baz\0foo"})
+
+        self.table.put("bar\0foo", {"f:bar\0baz": "baz\0foo"})
+        row = self.table.row('bar\0foo')
+        self.assertEquals(row, {"f:bar\0baz": "baz\0foo"})
+
+        i = 0
+        for row_key, obj in self.table.scan():
+            i += 1
+
+        self.assertEquals(i, 4)
+
+    def test_input_with_xnull(self):
+        self.table.put("foo", {"f:bar\x00": "baz\x00"})
+        row = self.table.row('foo')
+        self.assertEquals(row, {"f:bar\x00": "baz\x00"})
+
 
     def test_empty_put(self):
         self.assertRaises(ValueError, self.table.put, 'foo', {})
@@ -241,15 +263,8 @@ class TestCTablePut(unittest.TestCase):
 
     def test_big_qualifier(self):
         ## Greater than 1024
-        print "before self.table.put"
         self.table.put('foo', {'f:' + ''.join(['a' for _ in range(10000)]): 'baz'})
-        print "after self.table.put"
-        print "table is"
-        print self.table
-        print "after self.table"
-        print self.table.table_name
         row = self.table.row('foo')
-        print "after row"
         self.assertEquals(row, {'f:' + ''.join(['a' for _ in range(10000)]): 'baz'})
 
 
@@ -280,17 +295,13 @@ class TestCTablePutSplit(unittest.TestCase):
         self.connection.close()
 
     def test_first(self):
-        print "test_first**********************************************************************************"
         self.connection.create_table(TABLE_NAME, {'f': {}})
         self.table = _table(self.connection, TABLE_NAME)
-        print "before table.put****************************************************************************"
         self.table.put("a", {"f:{cq}".format(cq='f' * i): str(i) for i in range(1000)})
-        print "before table.put****************************************************************************"
         row = self.table.row("a")
         self.assertEquals(row, {"f:{cq}".format(cq='f' * i): str(i) for i in range(1000)})
 
     def test_second(self):
-        print "test_second"
         self.connection.create_table(TABLE_NAME, {'ff': {}})
         self.table = _table(self.connection, TABLE_NAME)
         self.table.put("a", {"ff:{cq}".format(cq='f' * i): str(i) for i in range(1000)})
@@ -298,7 +309,6 @@ class TestCTablePutSplit(unittest.TestCase):
         self.assertEquals(row, {"ff:{cq}".format(cq='f' * i): str(i) for i in range(1000)})
 
     def test_third(self):
-        print "test_third"
         self.connection.create_table(TABLE_NAME, {'fff': {}})
         self.table = _table(self.connection, TABLE_NAME)
         self.table.put("a", {"fff:{cq}".format(cq='f' * i): str(i) for i in range(1000)})
@@ -453,7 +463,6 @@ class TestCTableBatch(unittest.TestCase):
         # TODO scan for the good rows
         i = 0
         for row_key, obj in self.table.scan():
-            print row_key, obj
             i += 1
 
         self.assertEquals(i, 3)
@@ -598,7 +607,7 @@ connection = _connection(CLDBS)
 connection.delete_table(TABLE_NAME)
 connection.create_table(TABLE_NAME, {'f': {}})
 table = _table(connection, TABLE_NAME)
-table.batch([('put', 'hello{}'.format(i), {'f:bar':'bar{}'.format(i)}) for i in range(100)])
+table.batch([('put', 'hello{}'.format(i), {'f:bar':'bar{}'.format(i)}) for i in range(100000)])
 table.put("test", {"f:foo": "bar"})
 table.row('test')
 table.delete('test')
@@ -678,8 +687,10 @@ connection = _connection(CLDBS)
 connection.delete_table(TABLE_NAME)
 connection.create_table(TABLE_NAME, {'f': {}})
 table = _table(connection, TABLE_NAME)
+
+lol = [('put', 'hello{}'.format(i), {'f:bar':'bar{}'.format(i)}) for i in range(10)]
 s = datetime.now()
-table.batch([('put', 'hello{}'.format(i), {'f:bar':'bar{}'.format(i)}) for i in range(1000000)], True)
+table.batch(lol, True)
 e = datetime.now()
 print e - s
 

@@ -410,13 +410,28 @@ typedef struct {
     hb_admin_t admin;
 } Connection;
 
-static void cl_dsc_cb(int32_t err, hb_client_t client, void *connection) {
+static void cl_dsc_cb(int32_t err, hb_client_t client, void *extra) {
     // Perhaps I could add a is_client_open boolean to connection ?
+}
+
+void admin_disconnection_callback(int32_t err, hb_admin_t admin, void *extra){
+    printf("*****************************************************************admin_dc_cb: err = %d\n", err);
 }
 
 static PyObject *Connection_close(Connection *self) {
     if (self->is_open) {
-        hb_client_destroy(self->client, cl_dsc_cb, self);
+        /*
+        printf("In connection close\n");
+        if (!self->admin) {
+            printf("admin is null\n");
+        } else {
+            printf("admin is not null\n");
+        }
+        */
+        //TODO this is causing a seg fault?
+        //hb_admin_destroy(self->admin, admin_disconnection_callback, NULL);
+        self->admin = NULL;
+        hb_client_destroy(self->client, cl_dsc_cb, NULL);
         hb_connection_destroy(self->conn);
         self->is_open = false;
     }
@@ -424,10 +439,12 @@ static PyObject *Connection_close(Connection *self) {
 }
 
 static void Connection_dealloc(Connection *self) {
-    //Connection_close(self);
-    //Py_XDECREF(self->cldbs);
-    //hb_admin_destroy(self->admin, admin_disconnection_callback)
-    //self->ob_type->tp_free((PyObject *) self);
+    Connection_close(self);
+    //printf("after connection close\n");
+    Py_XDECREF(self->cldbs);
+    //printf("after xdecref cldbs\n");
+    self->ob_type->tp_free((PyObject *) self);
+    //printf("after tp_free\n");
     // I don't think I need to Py_XDECREF on conn and client?
 }
 
@@ -496,7 +513,9 @@ static PyObject *Connection_open(Connection *self) {
             return NULL;
         }
 
+        //("before admin create\n");
         err = hb_admin_create(self->conn, &self->admin);
+        //printf("after admin create\n");
         OOM_OBJ_RETURN_NULL(self->admin);
         if (err != 0) {
             PyErr_SetString(PyExc_ValueError, "Could not create admin from connection");
@@ -557,14 +576,16 @@ static PyObject *Connection_delete_table(Connection *self, PyObject *args) {
     }
 
     int err;
-
+    //printf("before admin table exists\n");
     err = hb_admin_table_exists(self->admin, NULL, table_name);
+    //printf("after admin table exists\n");
     if (err != 0) {
         PyErr_Format(PyExc_ValueError, "Table '%s' does not exist\n", table_name);
         return NULL;
     }
-
+    //printf("before admin table delete\n");
     err = hb_admin_table_delete(self->admin, name_space, table_name);
+    //printf("after admin table delete\n");
     if (err != 0) {
         PyErr_SetString(HBaseError, "Failed to delete table");
         return NULL;
@@ -596,7 +617,9 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
         return NULL;
     }
 
+    //printf("con create table before admin table exists\n");
     err = hb_admin_table_exists(self->admin, NULL, table_name);
+    //printf("concreate table after admin table exists\n");
     if (err == 0) {
         PyErr_SetString(PyExc_ValueError, "Table already exists\n");
         return NULL;
@@ -696,8 +719,16 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
         counter++;
     }
     //printf("before table_create\n");
+    //printf("before con create table table create\n");
     err = hb_admin_table_create(self->admin, NULL, table_name, families, number_of_families);
+    //printf("after con create table table create\n");
     //printf("after table_create\n");
+
+    for (counter = 0; counter < number_of_families; counter++) {
+        hb_coldesc_destroy(families[counter]);
+    }
+
+
     if (err != 0) {
         //printf("err != 0\n");
         if (err == 36) {
@@ -810,10 +841,6 @@ typedef struct {
     // Do I need to INCREF/DECREF this since I am exposing it to the python layer?
     // Is it better or worse taht this is char * instead of PyObject * ?
     char *table_name;
-    //pthread_mutex_t mutex;
-    //uint64_t count;
-    //PyObject *ret;
-    //PyObject *rets;
 } Table;
 
 /*
@@ -908,8 +935,8 @@ struct BatchCallBackBuffer {
 
 
 static void Table_dealloc(Table *self) {
-    //Py_XDECREF(self->connection);
-    //self->ob_type->tp_free((PyObject *) self);
+    Py_XDECREF(self->connection);
+    self->ob_type->tp_free((PyObject *) self);
 }
 
 /*
@@ -932,7 +959,9 @@ static int Table_init(Table *self, PyObject *args, PyObject *kwargs) {
     }
 
     //int err = hb_admin_table_exists(self->connection->admin, NULL, self->table_name);
+    //printf("before table_init create table table create\n");
     int err = hb_admin_table_exists(connection->admin, NULL, table_name);
+    //printf("after table_init create table table create\n");
     if (err != 0) {
         // Apparently in INIT methods I have to return -1, NOT NULL or else it won't work properly
         PyErr_Format(PyExc_ValueError, "Table '%s' does not exist", table_name);
@@ -1003,13 +1032,14 @@ static int read_result(hb_result_t result, PyObject *dict) {
         PyObject *key = Py_BuildValue("s", fq);
         free(fq);
         if (!key) {
-            //free(value_char);
+            free(value_char);
             return 12; //ENOMEM Cannot allocate memory
         }
 
         PyObject *value = Py_BuildValue("s", value_char);
         free(value_char);
         if (!value) {
+            Py_DECREF(key);
             return 12; //ENOMEM Cannot allocate memory
         }
 
@@ -1017,10 +1047,14 @@ static int read_result(hb_result_t result, PyObject *dict) {
         err = PyDict_SetItem(dict, key, value);
         if (err != 0) {
             // Is this check necessary?
+            Py_DECREF(key);
+            Py_DECREF(value);
             return err;
         }
         //printf("keys ref count after set item is %i\n", key->ob_refcnt);
-        // TODO Do I need to decref key and value?
+        // TODO Do I need to decref key and value? Yes I do
+        Py_DECREF(key);
+        Py_DECREF(value);
 
     }
 
@@ -1385,13 +1419,11 @@ lol()
 
 static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObject *dict, hb_put_t *hb_put, bool is_bufferable) {
     int err;
-    //printf("in make put before oom checks\n");
+
     OOM_OBJ_RETURN_ERRNO(self);
     OOM_OBJ_RETURN_ERRNO(row_buf);
     OOM_OBJ_RETURN_ERRNO(row_key);
     OOM_OBJ_RETURN_ERRNO(dict);
-    //printf("after oom checks\n");
-
 
     int size = PyDict_Size(dict);
     if (size < 1) {
@@ -1411,9 +1443,9 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
     // https://docs.python.org/2/c-api/dict.html?highlight=pydict_next#c.PyDict_Next
     // This says PyDict_Next borrows references for key and value...
     while (PyDict_Next(dict, &pos, &fq, &value)) {
-        //printf("looping\n");
+
         // Its weird if I loop batch with 100000, the ref count is 100002 for value??
-        //printf("value ref count is %i\n", value->ob_refcnt);
+
         char *fq_char = PyString_AsString(fq);
 
         OOM_OBJ_RETURN_ERRNO(fq_char);
@@ -1488,6 +1520,7 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     if (!PyArg_ParseTuple(args, "sO!", &row_key, &PyDict_Type, &dict)) {
         return NULL;
     }
+    //printf("Table_put dict ref count is %i\n", dict->ob_refcnt);
 
     int err = 0;
 
@@ -1505,6 +1538,7 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     //printf("before make put\n");
     // TODO activate is bufferable
     err = make_put(self, row_buf, row_key, dict, &hb_put, true);
+    //printf("after make_put dict's ref count is %i\n", dict->ob_refcnt);
     //OOM_OBJ_RETURN_NULL(hb_put);
     /*
     if (!hb_put) {
@@ -1518,8 +1552,8 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     //printf("after hb_put check\n");
     //OOM_OBJ_RETURN_NULL(hb_put);
     if (err != 0) {
-        //delete row_buf;
-        //delete call_back_buffer;
+        delete row_buf;
+        delete call_back_buffer;
         // This would just override the error message set in make_put
         // PyErr_SetString(PyExc_ValueError, "Could not create put oh noo");
         // TODO A cool feature would be to let the user specify column families (since the API doesn't let me figure it out)
@@ -1556,8 +1590,8 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     // Ya so if err is not 0, call back has not been invoked, and its safe/necessary to delete row_buf
     err = hb_mutation_send(self->connection->client, (hb_mutation_t)hb_put, put_callback, call_back_buffer);
     if (err != 0) {
-        //delete row_buf;
-        //delete call_back_buffer;
+        delete row_buf;
+        delete call_back_buffer;
         PyErr_Format(HBaseError, "Put failed to send: %i", err);
         return NULL;
     }
@@ -1580,7 +1614,7 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     err = hb_client_flush(self->connection->client, client_flush_callback, NULL);
     if (err != 0) {
         // callback will have deleted the row buf
-        //delete call_back_buffer;
+        delete call_back_buffer;
         PyErr_Format(HBaseError, "Put failed to flush: %i", err);
         //return NULL; // lol this was commented before UNCOMMENT THIS
     }
@@ -1694,7 +1728,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 call_back_buffer->count = 1;
                 delete call_back_buffer->rowBuf;
                 pthread_mutex_unlock(&call_back_buffer->mutex);
-                //Py_DECREF(dict);
+                Py_DECREF(dict);
                 // TODO If I decref this will i seg fault if i access it later?
                 // Should it be set to a none?
                 return;
@@ -1718,7 +1752,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 call_back_buffer->count = 1;
                 delete call_back_buffer->rowBuf;
                 pthread_mutex_unlock(&call_back_buffer->mutex);
-                //Py_DECREF(dict);
+                Py_DECREF(dict);
                 return;
             }
 
@@ -1733,16 +1767,18 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 call_back_buffer->count = 1;
                 delete call_back_buffer->rowBuf;
                 pthread_mutex_unlock(&call_back_buffer->mutex);
-                //Py_DECREF(dict);
-                //Py_DECREF(tuple);
+                Py_DECREF(dict);
+                Py_DECREF(tuple);
                 // TODO If I decref this will i seg fault if i access it later?
                 // Should itb e set to a none?
                 return;
             }
             //printf("dicts ref count after append %i\n", dict->ob_refcnt);
 
-            //Py_DECREF(dict);
+            Py_DECREF(dict);
             //printf("dicts ref count after decref %i", dict->ob_refcnt);
+
+            // Do I need to decref tuple?
 
             hb_result_destroy(results[r]);
         }
@@ -2268,7 +2304,8 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
                 continue;
             }
 
-            // do I need to increment dict?
+            // do I need to increment dict? or decrement it?
+            // do I need to destroy hb_put on erors?
             hb_put_t hb_put;
             err = make_put(self, rowBuf, row_key_char, dict, &hb_put, is_bufferable_bool);
             //printf("dict ref count after make put %i\n", dict->ob_refcnt);
@@ -2291,6 +2328,7 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
             //printf("dict ref count after send %i\n", dict->ob_refcnt);
             // TODO ADD the hb_put to the call back buffer and free it!
             if (err != 0) {
+                // TODO do I need to hb_mutation_destroy(hb_put) ?
                 pthread_mutex_lock(&batch_call_back_buffer->mutex);
                 batch_call_back_buffer->errors++;
                 batch_call_back_buffer->count++;
@@ -2326,6 +2364,7 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
             }
             err = hb_mutation_send(self->connection->client, (hb_mutation_t)hb_delete, delete_callback, call_back_buffer);
             if (err != 0) {
+                // Do I need to destroy the mutation if send fails?
                 pthread_mutex_lock(&batch_call_back_buffer->mutex);
                 batch_call_back_buffer->errors++;
                 batch_call_back_buffer->count++;
@@ -2412,7 +2451,7 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
     PyObject *ret_tuple = Py_BuildValue("iO", errors, results);
     OOM_OBJ_RETURN_NULL(ret_tuple);
 
-    //Py_DECREF(results);
+    Py_DECREF(results);
 
     return ret_tuple;
 }
@@ -2493,7 +2532,63 @@ static PyObject *pychbase_system(PyObject *self, PyObject *args)
     }
     return PyLong_FromLong(sts);
 }
+/*
+from _pychbase import *
+import sys
+lol = 'noob'
+sys.getrefcount(lol)
+py_buildvalue_char(lol)
+sys.getrefcount(lol)
+*/
+static PyObject *py_buildvalue_char(PyObject *self, PyObject *args) {
+    char *row_key;
+    if (!PyArg_ParseTuple(args, "s", &row_key)) {
+        return NULL;
+    }
 
+    //printf("row_key ref count is %i\n", row_key->ob_refcnt);
+    //char *row_key_char = PyString_AsString(row_key);
+    //printf("row_key ref count is now %i\n", row_key->ob_refcnt);
+
+    PyObject *row_key_obj;
+    row_key_obj = Py_BuildValue("s", row_key);
+    printf("row_key_obj ref count is now %i\n", row_key_obj->ob_refcnt);
+    //Py_INCREF(row_key_obj);
+    // It looks like I have to decref this if I'm not going to be retuning it
+    //printf("row_key_obj is now %i\n", row_key_obj->ob_refcnt);
+    // ref count is 1, so Py_BuildValue("s", ...) doesn't increase the refcnt?
+    //Py_DECREF(row_key_obj);
+
+    PyObject *dict = PyDict_New();
+    printf("dict ref count %i\n", dict->ob_refcnt);
+
+    PyObject *key = Py_BuildValue("s", "foo");
+    printf("key ref count is %i\n", key->ob_refcnt);
+
+    PyDict_SetItem(dict, key, row_key_obj);
+    printf("after set item\n");
+    printf("dict ref count %i\n", dict->ob_refcnt);
+    printf("key ref count is %i\n", key->ob_refcnt);
+    printf("row_key_obj ref count is now %i\n", row_key_obj->ob_refcnt);
+    Py_DECREF(key);
+    Py_DECREF(row_key_obj);
+    printf("after decrefs\n");
+    printf("dict ref count %i\n", dict->ob_refcnt);
+    printf("key ref count is %i\n", key->ob_refcnt);
+    printf("row_key_obj ref count is now %i\n", row_key_obj->ob_refcnt);
+
+
+    //PyObject *tuple;
+    //printf("tuple ref count is %i\n", tuple->ob_refcnt);
+    //tuple = Py_BuildValue("(O)", row_key_obj);
+    //printf("row_key_obj ref count is now %i\n", row_key_obj->ob_refcnt);
+    // ref count is 2, so Py_BuildValue("(O)", ...) increfds the rec on the O
+    //printf("tuple ref count is now %i\n", tuple->ob_refcnt);
+    //ref count here is 1, so the tuples ref count doesn't increase
+
+    Py_RETURN_NONE;
+    //return tuple;
+}
 
 static PyObject *lol(PyObject *self, PyObject *args) {
     printf("Noob\n");
@@ -2772,6 +2867,7 @@ static PyMethodDef SpamMethods[] = {
     {"print_list", print_list, METH_VARARGS, "prints a list"},
     {"print_list_fast", print_list_fast, METH_VARARGS, "prints a list using the fast api"},
     {"print_list_t", print_list_t, METH_VARARGS, "pritns a list of tuples"},
+    {"py_buildvalue_char", py_buildvalue_char, METH_VARARGS, "build value string"},
     {NULL, NULL, 0, NULL}
 };
 
