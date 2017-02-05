@@ -1534,7 +1534,7 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     //    return PyErr_NoMemory();
     //}
 
-    hb_put_t hb_put;
+    hb_put_t hb_put = NULL; // This must be initialized to NULL or else hb_mutation_destroy could fail
     //printf("before make put\n");
     // TODO activate is bufferable
     err = make_put(self, row_buf, row_key, dict, &hb_put, true);
@@ -1554,6 +1554,7 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     if (err != 0) {
         delete row_buf;
         delete call_back_buffer;
+        hb_mutation_destroy((hb_mutation_t) hb_put);
         // This would just override the error message set in make_put
         // PyErr_SetString(PyExc_ValueError, "Could not create put oh noo");
         // TODO A cool feature would be to let the user specify column families (since the API doesn't let me figure it out)
@@ -1592,6 +1593,7 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     if (err != 0) {
         delete row_buf;
         delete call_back_buffer;
+        hb_mutation_destroy((hb_mutation_t) hb_put);
         PyErr_Format(HBaseError, "Put failed to send: %i", err);
         return NULL;
     }
@@ -1745,6 +1747,8 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
 
             PyObject *tuple = Py_BuildValue("sO",(char *)key_char, dict);
             free(key_char);
+            // TODO Can't I Py_DECREF(dict) here instead?
+            Py_DECREF(dict);
 
             if (!tuple) {
                 pthread_mutex_lock(&call_back_buffer->mutex);
@@ -1752,7 +1756,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 call_back_buffer->count = 1;
                 delete call_back_buffer->rowBuf;
                 pthread_mutex_unlock(&call_back_buffer->mutex);
-                Py_DECREF(dict);
+                //Py_DECREF(dict);
                 return;
             }
 
@@ -1767,7 +1771,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 call_back_buffer->count = 1;
                 delete call_back_buffer->rowBuf;
                 pthread_mutex_unlock(&call_back_buffer->mutex);
-                Py_DECREF(dict);
+                //Py_DECREF(dict);
                 Py_DECREF(tuple);
                 // TODO If I decref this will i seg fault if i access it later?
                 // Should itb e set to a none?
@@ -1775,7 +1779,9 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
             }
             //printf("dicts ref count after append %i\n", dict->ob_refcnt);
 
-            Py_DECREF(dict);
+
+            //TODO shouldn't I Py_DECREF the tuple here?
+            Py_DECREF(tuple);
             //printf("dicts ref count after decref %i", dict->ob_refcnt);
 
             // Do I need to decref tuple?
@@ -1803,6 +1809,8 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
         call_back_buffer->count = 1;
         delete call_back_buffer->rowBuf;
         pthread_mutex_unlock(&call_back_buffer->mutex);
+
+        hb_scanner_destroy(scan, NULL, NULL);
     }
 }
 
@@ -1836,6 +1844,7 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
     if (err != 0) {
         // TODO I should probably verify that nothing will go wrong in the event self->table_name is NULL
         PyErr_Format(PyExc_ValueError, "Failed to set table '%s' on scanner: %i", self->table_name, err);
+        hb_scanner_destroy(scan, NULL, NULL);
         return NULL;
     }
 
@@ -1843,6 +1852,7 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
     err = hb_scanner_set_num_versions(scan, 1);
     if (err != 0) {
         PyErr_Format(HBaseError, "Failed to set num versions on scanner: %i", err);
+        hb_scanner_destroy(scan, NULL, NULL);
         return NULL;
     }
 
@@ -1851,6 +1861,7 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
         if (err != 0) {
             // ValueError as I am assuming this is a user error in the row key value
             PyErr_Format(PyExc_ValueError, "Failed to set start row on scanner: %i", err);
+            hb_scanner_destroy(scan, NULL, NULL);
             return NULL;
         }
     }
@@ -1859,6 +1870,7 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
         if (err != 0) {
             // ValueError as I am assuming this is a user error in the row key value
             PyErr_Format(PyExc_ValueError, "Failed to set stop row on scanner: %i", err);
+            hb_scanner_destroy(scan, NULL, NULL);
             return NULL;
         }
     }
@@ -1872,6 +1884,7 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
     err = hb_scanner_set_num_max_rows(scan, 1);
     if (err != 0) {
         PyErr_Format(HBaseError, "Failed to set num_max_rows scanner: %i", err);
+        hb_scanner_destroy(scan, NULL, NULL);
         return NULL;
     }
 
@@ -1880,18 +1893,26 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
     OOM_OBJ_RETURN_NULL(row_buf);
 
     CallBackBuffer *call_back_buffer = new CallBackBuffer(self, row_buf, NULL);
-    // TODO replace this and delete row_buf
-    OOM_OBJ_RETURN_NULL(call_back_buffer);
+    if (!call_back_buffer) {
+        hb_scanner_destroy(scan, NULL, NULL);
+        return PyErr_NoMemory();
+    }
 
     call_back_buffer->ret = PyList_New(0);
-    // TODO replcae this and delete call_back_buffer
-    OOM_OBJ_RETURN_NULL(call_back_buffer->ret);
+    if (!call_back_buffer->ret) {
+        hb_scanner_destroy(scan, NULL, NULL);
+        delete row_buf;
+        delete call_back_buffer;
+        return PyErr_NoMemory();
+    }
 
-
+    // The only time this returns non zero is if it cannot get the JNI, and callback is guarenteed not to execute
     err = hb_scanner_next(scan, scan_callback, call_back_buffer);
     if (err != 0) {
         PyErr_Format(HBaseError, "Scan failed: %i", err);
-        // TODO do I need to delete anything ??
+        hb_scanner_destroy(scan, NULL, NULL);
+        delete row_buf;
+        delete call_back_buffer;
         return NULL;
     }
     uint64_t local_count = 0;
@@ -1903,7 +1924,6 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
         sleep(0.1);
     }
 
-    // TODO I need to free this right
     PyObject *ret = call_back_buffer->ret;
     //printf("ret has ref count of %i\n", ret->ob_refcnt);
     err = call_back_buffer->err;
@@ -1912,6 +1932,7 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
 
     if (err != 0) {
         PyErr_Format(HBaseError, "Scan failed: %i", err);
+        Py_XDECREF(ret);
         return NULL;
     }
 
