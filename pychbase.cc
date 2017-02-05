@@ -589,7 +589,7 @@ static PyObject *Connection_delete_table(Connection *self, PyObject *args) {
     err = hb_admin_table_delete(self->admin, name_space, table_name);
     //printf("after admin table delete\n");
     if (err != 0) {
-        PyErr_SetString(HBaseError, "Failed to delete table");
+        PyErr_Format(HBaseError, "Failed to delete table '%s'\n", table_name);
         return NULL;
     }
 
@@ -623,7 +623,7 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
     err = hb_admin_table_exists(self->admin, NULL, table_name);
     //printf("concreate table after admin table exists\n");
     if (err == 0) {
-        PyErr_SetString(PyExc_ValueError, "Table already exists\n");
+        PyErr_Format(PyExc_ValueError, "Table '%s' already exists\n", table_name);
         return NULL;
     }
 
@@ -2094,14 +2094,14 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
         hb_mutation_destroy((hb_mutation_t) hb_delete);
         delete row_buf;
         delete call_back_buffer;
-        PyErr_SetString(HBaseError, "Delete failed to send and may not have succeeded");
+        PyErr_Format(HBaseError, "Delete failed to send and may not have succeeded: %i", err);
         return NULL;
     }
 
     err = hb_client_flush(self->connection->client, client_flush_callback, NULL);
     if (err != 0) {
         delete call_back_buffer;
-        PyErr_SetString(HBaseError, "Delete failed to flush and may not have succeeded");
+        PyErr_Format(HBaseError, "Delete failed to flush and may not have succeeded: %i", err);
         return NULL;
     }
     // TODO do I need to lock this?
@@ -2118,7 +2118,7 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
     delete call_back_buffer;
 
     if (err != 0) {
-        PyErr_SetString(HBaseError, "Delete may have failed");
+        PyErr_Format(HBaseError, "Delete may have failed: %i", err);
         return NULL;
     }
 
@@ -2486,7 +2486,7 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
             // The documentation doesn't specify if this would ever return an error or why.
             // If this fails with an error and the call back is never invoked, my script would hang..
             // I'll temporarily raise an error until I can clarify this
-            PyErr_SetString(HBaseError, "Flush failed. Batch may be partially committed");
+            PyErr_Format(HBaseError, "Flush failed. Batch may be partially committed: %i", err);
             return NULL;
         }
         //printf("Waiting for all callbacks to return ...\n");
