@@ -466,6 +466,8 @@ static int Connection_init(Connection *self, PyObject *args, PyObject *kwargs) {
     self->cldbs = cldbs;
     Py_XDECREF(tmp);
 
+    self->admin = NULL;
+
     // Todo make CLDBS optional, and then find it from /opt/mapr/conf
 
     return 0;
@@ -1352,6 +1354,9 @@ void put_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result
             pthread_mutex_unlock(&call_back_buffer->batch_call_back_buffer->mutex);
         }
         pthread_mutex_unlock(&call_back_buffer->mutex);
+
+        hb_mutation_destroy(mutation);
+
         return;
     }
 
@@ -1964,6 +1969,8 @@ void delete_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_res
         }
         pthread_mutex_unlock(&call_back_buffer->mutex);
 
+        hb_mutation_destroy(mutation);
+
         return;
     }
 
@@ -2030,10 +2037,11 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
     int err = 0;
 
     // TODO Do I need to check to see if hb_delete is null inside of the make_delete function?
-    hb_delete_t hb_delete;
+    hb_delete_t hb_delete = NULL;
     err = make_delete(self, row_key, &hb_delete);
     OOM_ERRNO_RETURN_NULL(err);
     if (err != 0) {
+        hb_mutation_destroy((hb_mutation_t) hb_delete);
         if (err == -5) {
             PyErr_SetString(PyExc_ValueError, "row_key was empty string");
             return NULL;
@@ -2044,14 +2052,22 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
 
     // I'm not even using the row_buf for deletes
     RowBuffer *row_buf = new RowBuffer();
-    OOM_OBJ_RETURN_NULL(row_buf);
+    if (!row_buf) {
+        hb_mutation_destroy((hb_mutation_t) hb_delete);
+        return PyErr_NoMemory();
+    }
 
     CallBackBuffer *call_back_buffer = new CallBackBuffer(self, row_buf, NULL);
     // TODO replace this and delete row_buf
-    OOM_OBJ_RETURN_NULL(call_back_buffer);
+    if (!call_back_buffer) {
+        hb_mutation_destroy((hb_mutation_t) hb_delete);
+        delete row_buf;
+    }
 
+    // If err is not 0, callback has not been invoked
     err = hb_mutation_send(self->connection->client, (hb_mutation_t)hb_delete, delete_callback, call_back_buffer);
     if (err != 0) {
+        hb_mutation_destroy((hb_mutation_t) hb_delete);
         delete row_buf;
         delete call_back_buffer;
         PyErr_SetString(HBaseError, "Delete failed to send and may not have succeeded");
@@ -2327,7 +2343,7 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
             // do I need to increment dict? or decrement it?
             // do I need to destroy hb_put on erors?
-            hb_put_t hb_put;
+            hb_put_t hb_put = NULL;
             err = make_put(self, rowBuf, row_key_char, dict, &hb_put, is_bufferable_bool);
             //printf("dict ref count after make put %i\n", dict->ob_refcnt);
             if (err != 0) {
@@ -2338,6 +2354,8 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
                 call_back_buffer->count++;
                 call_back_buffer->err = err;
+
+                hb_mutation_destroy(hb_put);
 
                 delete rowBuf;
 
@@ -2364,11 +2382,13 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
                 }
                 pthread_mutex_unlock(&call_back_buffer->mutex);
 
+                hb_mutation_destroy((hb_mutation_t) hb_put);
+
                 continue;
             }
 
         } else if (strcmp(mutation_type_char, "delete") == 0) {
-            hb_delete_t hb_delete;
+            hb_delete_t hb_delete = NULL;
             err = make_delete(self, row_key_char, &hb_delete);
             if (err != 0) {
                 pthread_mutex_lock(&batch_call_back_buffer->mutex);
@@ -2380,6 +2400,8 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
                 call_back_buffer->err = err;
 
                 delete rowBuf;
+
+                hb_mutation_destroy((hb_mutation_t) hb_delete);
 
                 continue;
             }
@@ -2399,6 +2421,8 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
                     delete rowBuf;
                 }
                 pthread_mutex_unlock(&call_back_buffer->mutex);
+
+                hb_mutation_destroy((hb_mutation_t) hb_delete);
 
                 continue;
             }
