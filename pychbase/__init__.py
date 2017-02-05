@@ -1,4 +1,3 @@
-
 from _pychbase import _connection, _table, HBaseError
 
 # TODO It would be cool to see if ld_library_path is set correctly?
@@ -69,12 +68,16 @@ class Table(object):
             yield k, v
 
     def delete_prefix(self, rowkey_prefix):
+        delete_count = 0
         batch = self.batch()
         for row_key, obj in self.scan(rowkey_prefix, rowkey_prefix + '~'):
             batch.delete(row_key)
+            delete_count += 1
 
-        batch.send()
+        errors = batch.send()
+        # Should I raise an exception if there are errors?
 
+        return delete_count
 
     def close(self):
         self.connection.close()
@@ -102,6 +105,7 @@ class Batch(object):
             self.send()
 
     def send(self):
-        self.table._table.batch(self._actions)
+        errors, results = self.table._table.batch(self._actions)
         self._actions = []
+        return errors
 

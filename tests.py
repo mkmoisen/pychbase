@@ -337,6 +337,13 @@ class TestCTableDelete(unittest.TestCase):
         row = self.table.row('foo')
         self.assertEquals(row, {})
 
+        for i in range(100):
+            self.table.delete('foo')
+
+    def test_type(self):
+        self.assertRaises(TypeError, self.table.delete, 1)
+        self.assertRaises(TypeError, self.table.delete, {'foo':'bar'})
+
     def test_empty_row_key(self):
         self.assertRaises(ValueError, self.table.delete, '')
 
@@ -373,7 +380,6 @@ class TestCTableScanHappy(unittest.TestCase):
                 self.assertEquals(row_key, "zzz{i}".format(i=i-18))
                 self.assertEquals(obj, {"f:zzz{i}".format(i=i-18): 'zzz{i}'.format(i=i-18)})
 
-
         self.assertEquals(i, 27)
 
     def test_happy_start(self):
@@ -383,7 +389,6 @@ class TestCTableScanHappy(unittest.TestCase):
             self.assertEquals(row_key, "zzz{i}".format(i=i))
             self.assertEquals(obj, {"f:zzz{i}".format(i=i): 'zzz{i}'.format(i=i)})
 
-
         self.assertEquals(i, 9)
 
     def test_happy_stop(self):
@@ -392,7 +397,6 @@ class TestCTableScanHappy(unittest.TestCase):
             i += 1
             self.assertEquals(row_key, "aaa{i}".format(i=i))
             self.assertEquals(obj, {"f:aaa{i}".format(i=i): 'aaa{i}'.format(i=i)})
-
 
         self.assertEquals(i, 9)
 
@@ -443,6 +447,9 @@ class TestCTableBatch(unittest.TestCase):
 
         self.assertEquals(i, 0)
 
+    def test_happy_big_column(self):
+        self.table.batch([('put', 'foo%i' % i, {"f:bar%o" % o: "baz%o" % o for o in range(100)}) for i in range(1, 1001)])
+
     def test_mixed_errors_put(self):
         actions = [
             ('put', 'a', {'f:foo': 'bar'}),
@@ -468,9 +475,18 @@ class TestCTableBatch(unittest.TestCase):
 
         self.assertEquals(i, 3)
 
-
     def test_mixed_errors_delete(self):
-        raise NotImplementedError
+        actions = [
+            ('delete', 'a'),
+            ('delete', 1),
+            ('delete', {"foo":"bar"}),
+            (1, 'a'),
+            ('invalid', 'b'),
+            'not a tuple'
+        ]
+        errors, results = self.table.batch(actions)
+        self.assertEquals(errors, len(actions) - 1)
+
 
     def test_empty_actions(self):
         errors, results = self.table.batch([])
@@ -557,7 +573,10 @@ class TestPython(unittest.TestCase):
 
         self.assertEquals(i, 0)
 
-        batch.send()
+        errors = batch.send()
+        self.assertEquals(errors, 0)
+
+        self.assertEquals(len(batch._actions), 0)
 
         i = 0
         for row_key, obj in table.scan(start='test', stop='test~'):
