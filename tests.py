@@ -1,5 +1,6 @@
 import unittest
 from pychbase import Connection, Table, Batch, _connection, _table
+from StringIO import StringIO
 
 # TODO lol I reimported _connection and _table once and it resulted in a segmentation fault?
 
@@ -481,7 +482,7 @@ class TestPython(unittest.TestCase):
         pass
 
     def tearDown(self):
-        connection = Connection(CLDBS)
+        connection = Connection()
         try:
             connection.delete_table(TABLE_NAME)
         except ValueError:
@@ -489,8 +490,17 @@ class TestPython(unittest.TestCase):
 
         connection.close()
 
+    def test_extract_zookeeper(self):
+        mapr_clusters_conf = StringIO("hadoopDev secure=true myhost:7222 myhost2:7222 myhost3:7222\n")
+        cldbs = Connection._extract_mapr_cldbs(mapr_clusters_conf)
+        self.assertEquals(cldbs, 'myhost:7222,myhost2:7222,myhost3:7222')
+
+        mapr_clusters_conf = StringIO("Mapr5.1 hadoopDev secure=true myhost:7222 myhost2:7222 myhost3:7222\n")
+        cldbs = Connection._extract_mapr_cldbs(mapr_clusters_conf)
+        self.assertEquals(cldbs, 'myhost:7222,myhost2:7222,myhost3:7222')
+
     def test_happy(self):
-        connection = Connection(CLDBS)
+        connection = Connection()
         connection.create_table(TABLE_NAME, {'f': {}})
         table = connection.table(TABLE_NAME)
         for i in range(0, 10):

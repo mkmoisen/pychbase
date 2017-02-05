@@ -12,8 +12,21 @@ class Connection(object):
         self._connection = _connection(cldbs)
         self._connection.open()
 
-    def _extract_cldbs(self):
-        raise NotImplementedError
+    @staticmethod
+    def _extract_cldbs():
+        try:
+            with open('/opt/mapr/conf/mapr-clusters.conf') as f:
+                return Connection._extract_mapr_cldbs(f)
+        except IOError:
+            raise ValueError("No zookeeper provided and could not be found in /opt/mapr/conf/mapr-clusters.conf")
+
+        # TODO add these for Cloudera and Horton works
+
+    @staticmethod
+    def _extract_mapr_cldbs(f):
+        first_line = f.readline()
+        statements = first_line.split()
+        return ','.join(zookeeper for zookeeper in statements if ':' in zookeeper)
 
     def table(self, table_name):
         return Table(self, table_name)
