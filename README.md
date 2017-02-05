@@ -5,7 +5,7 @@ Currently in beta, `pychbase` is tested on Python 2.7 and MapR 5.1.
 
 # LD_LIBRARY_PATH
 
-To compile as well as import `pychbase`, your `LD_LIBRARY_PATH` must have the directory with libjvm.so on it, normally in either
+To compile as well as import `pychbase`, your `LD_LIBRARY_PATH` must have the directory with libjvm.so on it, normally in either:
 
  * $JAVA_HOME/jre/lib/amd64/server
  * $JAVA_HOME/lib/amd64/server
@@ -41,7 +41,7 @@ Once you find the directory for `hbase.h`, replace the `/opt/mapr/include` in `s
 
 # Run the tests
 
-Currently you will have to open `tests.py` and replace the `ZOOKEEPER_ENSEMBLE` and `TABLE_NAME` constants with those in your environment. Afterwords, just run
+Currently you will have to open `tests.py` and replace the `ZOOKEEPERS` and `TABLE_NAME` constants with those in your environment. Afterwords, just run
 
     python tests.py
 
@@ -50,6 +50,8 @@ or
     nosetests -v
 
 # Usage
+
+I have attempted to mimic the great HappyBase API somewhat.
 
 Imports:
 
