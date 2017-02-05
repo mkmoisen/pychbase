@@ -1671,8 +1671,7 @@ static PyObject *Table_put(Table *self, PyObject *args) {
 /*
 * Remember to delete the rowBuf in all possible exit cases or else it will leak memory
 */
-// TODO I should re returning -1 for all the return; statements here!
-// But this is void...
+
 void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t numResults, void *extra) {
     // TODO I think its better to segfault to prevent hanging
     CallBackBuffer *call_back_buffer = (CallBackBuffer *) extra;
@@ -1683,6 +1682,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
         call_back_buffer->count = 1;
         delete call_back_buffer->rowBuf;
         pthread_mutex_unlock(&call_back_buffer->mutex);
+        hb_scanner_destroy(scan, NULL, NULL);
         return;
     }
     if (!results) {
@@ -1691,6 +1691,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
         call_back_buffer->count = 1;
         delete call_back_buffer->rowBuf;
         pthread_mutex_unlock(&call_back_buffer->mutex);
+        hb_scanner_destroy(scan, NULL, NULL);
         return;
     }
 
@@ -1709,6 +1710,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 call_back_buffer->count = 1;
                 delete call_back_buffer->rowBuf;
                 pthread_mutex_unlock(&call_back_buffer->mutex);
+                hb_scanner_destroy(scan, NULL, NULL);
                 return;
             }
 
@@ -1722,6 +1724,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 call_back_buffer->count = 1;
                 delete call_back_buffer->rowBuf;
                 pthread_mutex_unlock(&call_back_buffer->mutex);
+                hb_scanner_destroy(scan, NULL, NULL);
                 return;
             }
 
@@ -1738,6 +1741,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 Py_DECREF(dict);
                 // TODO If I decref this will i seg fault if i access it later?
                 // Should it be set to a none?
+                hb_scanner_destroy(scan, NULL, NULL);
                 return;
             }
 
@@ -1747,6 +1751,19 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
             // Should I do that ! with the type? Does that make it faster or slower lol
 
             char *key_char = (char *) malloc(1 + keyLen);
+            if (!key_char) {
+                pthread_mutex_lock(&call_back_buffer->mutex);
+                call_back_buffer->err = 12;
+                call_back_buffer->count = 1;
+                delete call_back_buffer->rowBuf;
+                pthread_mutex_unlock(&call_back_buffer->mutex);
+                Py_DECREF(dict);
+                // TODO If I decref this will i seg fault if i access it later?
+                // Should it be set to a none?
+                hb_scanner_destroy(scan, NULL, NULL);
+                return;
+            }
+            // TODO check this
             strncpy(key_char, (char *)key, keyLen);
             key_char[keyLen] = '\0';
 
@@ -1762,6 +1779,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 delete call_back_buffer->rowBuf;
                 pthread_mutex_unlock(&call_back_buffer->mutex);
                 //Py_DECREF(dict);
+                hb_scanner_destroy(scan, NULL, NULL);
                 return;
             }
 
@@ -1780,6 +1798,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 Py_DECREF(tuple);
                 // TODO If I decref this will i seg fault if i access it later?
                 // Should itb e set to a none?
+                hb_scanner_destroy(scan, NULL, NULL);
                 return;
             }
             //printf("dicts ref count after append %i\n", dict->ob_refcnt);
@@ -1804,6 +1823,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
             call_back_buffer->count = 1;
             delete call_back_buffer->rowBuf;
             pthread_mutex_unlock(&call_back_buffer->mutex);
+            hb_scanner_destroy(scan, NULL, NULL);
             return;
         }
     } else {
@@ -1838,7 +1858,7 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
 
     int err = 0;
 
-    hb_scanner_t scan;
+    hb_scanner_t scan = NULL;
     err = hb_scanner_create(self->connection->client, &scan);
     if (err != 0) {
         PyErr_Format(HBaseError, "Failed to create the scanner: %i", err);
@@ -1895,10 +1915,14 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
 
 
     RowBuffer *row_buf = new RowBuffer();
-    OOM_OBJ_RETURN_NULL(row_buf);
+    if (!row_buf) {
+        hb_scanner_destroy(scan, NULL, NULL);
+        return PyErr_NoMemory();
+    }
 
     CallBackBuffer *call_back_buffer = new CallBackBuffer(self, row_buf, NULL);
     if (!call_back_buffer) {
+        delete row_buf;
         hb_scanner_destroy(scan, NULL, NULL);
         return PyErr_NoMemory();
     }
@@ -1911,7 +1935,7 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
         return PyErr_NoMemory();
     }
 
-    // The only time this returns non zero is if it cannot get the JNI, and callback is guarenteed not to execute
+    // The only time this returns non zero is if it cannot get the JNI, and callback is guaranteed not to execute
     err = hb_scanner_next(scan, scan_callback, call_back_buffer);
     if (err != 0) {
         PyErr_Format(HBaseError, "Scan failed: %i", err);
@@ -2061,7 +2085,7 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
     // TODO replace this and delete row_buf
     if (!call_back_buffer) {
         hb_mutation_destroy((hb_mutation_t) hb_delete);
-        delete row_buf;
+        delete row_buf; return PyErr_NoMemory();
     }
 
     // If err is not 0, callback has not been invoked
