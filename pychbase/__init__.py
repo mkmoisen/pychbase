@@ -3,16 +3,16 @@ from _pychbase import _connection, _table, HBaseError
 # TODO It would be cool to see if ld_library_path is set correctly?
 
 class Connection(object):
-    def __init__(self, cldbs=None):
-        if cldbs is None:
-            cldbs = self._extract_cldbs()
+    def __init__(self, zookeepers=None):
+        if zookeepers is None:
+            zookeepers = self._extract_zookeepers()
 
-        self.cldbs = cldbs
-        self._connection = _connection(cldbs)
+        self.zookeepers = zookeepers
+        self._connection = _connection(zookeepers)
         self._connection.open()
 
     @staticmethod
-    def _extract_cldbs():
+    def _extract_zookeepers():
         try:
             with open('/opt/mapr/conf/mapr-clusters.conf') as f:
                 return Connection._extract_mapr_cldbs(f)

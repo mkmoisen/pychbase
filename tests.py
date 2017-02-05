@@ -4,7 +4,7 @@ from StringIO import StringIO
 
 # TODO lol I reimported _connection and _table once and it resulted in a segmentation fault?
 
-CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+ZOOKEEPERS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
 
@@ -18,7 +18,7 @@ class TestCConnection(unittest.TestCase):
         connection.close()
 
     def test_good_cldbs(self):
-        connection = _connection(CLDBS)
+        connection = _connection(ZOOKEEPERS)
         self.assertFalse(connection.is_open())
         connection.open()
         self.assertTrue(connection.is_open())
@@ -30,7 +30,7 @@ class TestCConnection(unittest.TestCase):
 
 class TestCConnectionManageTable(unittest.TestCase):
     def setUp(self):
-        connection = _connection(CLDBS)
+        connection = _connection(ZOOKEEPERS)
         try:
             connection.delete_table(TABLE_NAME)
         except ValueError:
@@ -38,7 +38,7 @@ class TestCConnectionManageTable(unittest.TestCase):
         connection.close()
 
     def tearDown(self):
-        connection = _connection(CLDBS)
+        connection = _connection(ZOOKEEPERS)
         try:
             connection.delete_table(TABLE_NAME)
         except ValueError:
@@ -46,55 +46,55 @@ class TestCConnectionManageTable(unittest.TestCase):
         connection.close()
 
     def test_good(self):
-        connection = _connection(CLDBS)
+        connection = _connection(ZOOKEEPERS)
         connection.create_table(TABLE_NAME, {'f': {}})
         connection.delete_table(TABLE_NAME)
 
     def test_already_created(self):
-        connection = _connection(CLDBS)
+        connection = _connection(ZOOKEEPERS)
         connection.create_table(TABLE_NAME, {'f': {}})
         self.assertRaises(ValueError, connection.create_table, TABLE_NAME, {'f': {}})
         connection.delete_table(TABLE_NAME)
 
     def test_already_deleted(self):
-        connection = _connection(CLDBS)
+        connection = _connection(ZOOKEEPERS)
         connection.create_table(TABLE_NAME, {'f': {}})
         connection.delete_table(TABLE_NAME)
         self.assertRaises(ValueError, connection.delete_table, TABLE_NAME)
 #
     def test_large_qualifier(self):
-        connection = _connection(CLDBS)
+        connection = _connection(ZOOKEEPERS)
         connection.create_table(TABLE_NAME, {''.join(['a' for _ in range(1000)]): {}})
         connection.delete_table(TABLE_NAME)
 
     def test_too_large_qualifier(self):
-        connection = _connection(CLDBS)
+        connection = _connection(ZOOKEEPERS)
         self.assertRaises(ValueError, connection.create_table, TABLE_NAME, {''.join(['a' for _ in range(10000)]): {}})
         # Verify that table was not fake-created mapr bug
         self.assertRaises(ValueError, connection.delete_table, TABLE_NAME)
 
     def test_really_big_table_name(self):
         ## I think MapR C API seg faults with a tablename > 10000
-        connection = _connection(CLDBS)
+        connection = _connection(ZOOKEEPERS)
         self.assertRaises(ValueError, connection.create_table, TABLE_NAME + ''.join(['a' for _ in range(10000)]), {'f': {}})
         self.assertRaises(ValueError, connection.delete_table, TABLE_NAME + ''.join(['a' for _ in range(10000)]))
 #
     def test_pretty_big_table_name(self):
         ## I think MapR C API does not seg faults with a tablename ~ 1000
-        connection = _connection(CLDBS)
+        connection = _connection(ZOOKEEPERS)
         self.assertRaises(ValueError, connection.create_table, TABLE_NAME + ''.join(['a' for _ in range(1000)]), {'f': {}})
         self.assertRaises(ValueError, connection.delete_table, TABLE_NAME + ''.join(['a' for _ in range(1000)]))
 
     def test_delete_really_big_table_name(self):
-        connection = _connection(CLDBS)
+        connection = _connection(ZOOKEEPERS)
         self.assertRaises(ValueError, connection.delete_table, TABLE_NAME + ''.join(['a' for _ in range(10000)]))
 
     def test_delete_pretty_big_table_name(self):
-        connection = _connection(CLDBS)
+        connection = _connection(ZOOKEEPERS)
         self.assertRaises(ValueError, connection.delete_table, TABLE_NAME + ''.join(['a' for _ in range(1000)]))
 
     def test_max_versions_happy(self):
-        connection = _connection(CLDBS)
+        connection = _connection(ZOOKEEPERS)
         connection.create_table(TABLE_NAME, {'f': {
             'max_versions': 1,
             'min_versions': 1,
@@ -105,18 +105,18 @@ class TestCConnectionManageTable(unittest.TestCase):
 
 
     def test_max_version_bad(self):
-        connection = _connection(CLDBS)
+        connection = _connection(ZOOKEEPERS)
         self.assertRaises(ValueError, connection.create_table, TABLE_NAME, {'f': {'max_versions': 'foo',}})
         self.assertRaises(ValueError, connection.delete_table, TABLE_NAME)
         self.assertRaises(ValueError, connection.create_table, TABLE_NAME, {'f': {'max_versions': 10000000000000000000}})
         self.assertRaises(ValueError, connection.create_table, TABLE_NAME, {'f': 'not a dict'})
 
     def test_invalid_key(self):
-        connection = _connection(CLDBS)
+        connection = _connection(ZOOKEEPERS)
         self.assertRaises(ValueError, connection.create_table, TABLE_NAME, {'f': {'foo': 'foo'}})
 
     def test_accept_unicode(self):
-        connection = _connection(CLDBS)
+        connection = _connection(ZOOKEEPERS)
         connection.create_table(TABLE_NAME, {u'f': {u'max_versions': 1}})
 
 
@@ -126,7 +126,7 @@ class TestCConnectionManageTable(unittest.TestCase):
 
 class TestCTableInit(unittest.TestCase):
     def setUp(self):
-        self.connection = _connection(CLDBS)
+        self.connection = _connection(ZOOKEEPERS)
         self.connection.create_table(TABLE_NAME, {'f': {}})
 
     def tearDown(self):
@@ -143,7 +143,7 @@ class TestCTableInit(unittest.TestCase):
         self.connection.close()  # This segfaulted if I set self->connection before raising the exception for some reason
 
     def test_unopened_connection(self):
-        self.connection = _connection(CLDBS)
+        self.connection = _connection(ZOOKEEPERS)
         table = _table(self.connection, TABLE_NAME)
         self.connection.close()
 
@@ -151,7 +151,7 @@ class TestCTableInit(unittest.TestCase):
 
 class TestCTableRow(unittest.TestCase):
     def setUp(self):
-        self.connection = _connection(CLDBS)
+        self.connection = _connection(ZOOKEEPERS)
         self.connection.create_table(TABLE_NAME, {'f': {}})
         self.table = _table(self.connection, TABLE_NAME)
         self.table.put("foo", {"f:bar": "baz"})
@@ -173,7 +173,7 @@ class TestCTableRow(unittest.TestCase):
 
 class TestCTablePut(unittest.TestCase):
     def setUp(self):
-        self.connection = _connection(CLDBS)
+        self.connection = _connection(ZOOKEEPERS)
         self.connection.create_table(TABLE_NAME, {'f': {}})
         self.table = _table(self.connection, TABLE_NAME)
 
@@ -286,7 +286,7 @@ class TestCTablePut(unittest.TestCase):
 class TestCTablePutSplit(unittest.TestCase):
     #Purpose of this is to test the C split function
     def setUp(self):
-        self.connection = _connection(CLDBS)
+        self.connection = _connection(ZOOKEEPERS)
 
     def tearDown(self):
         try:
@@ -321,7 +321,7 @@ class TestCTablePutSplit(unittest.TestCase):
 
 class TestCTableDelete(unittest.TestCase):
     def setUp(self):
-        self.connection = _connection(CLDBS)
+        self.connection = _connection(ZOOKEEPERS)
         self.connection.create_table(TABLE_NAME, {'f': {}})
         self.table = _table(self.connection, TABLE_NAME)
 
@@ -350,7 +350,7 @@ class TestCTableDelete(unittest.TestCase):
 
 class TestCTableScanHappy(unittest.TestCase):
     def setUp(self):
-        self.connection = _connection(CLDBS)
+        self.connection = _connection(ZOOKEEPERS)
         self.connection.create_table(TABLE_NAME, {'f': {}})
         self.table = _table(self.connection, TABLE_NAME)
         for i in range(1, 10):
@@ -420,7 +420,7 @@ class TestCTableScanHappy(unittest.TestCase):
 # TODO Need to add more columns to tests
 class TestCTableBatch(unittest.TestCase):
     def setUp(self):
-        self.connection = _connection(CLDBS)
+        self.connection = _connection(ZOOKEEPERS)
         self.connection.create_table(TABLE_NAME, {'f': {}})
         self.table = _table(self.connection, TABLE_NAME)
 
@@ -622,11 +622,11 @@ from _pychbase import _connection, _table
 
 # TODO lol I reimported _connection and _table once and it resulted in a segmentation fault?
 
-CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+ZOOKEEPERS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
 
-connection = _connection(CLDBS)
+connection = _connection(ZOOKEEPERS)
 connection.create_table(TABLE_NAME, {'f': {}})
 table = _table(connection, TABLE_NAME)
 table.put("foo", {"f:bar", "baz"})
@@ -648,9 +648,9 @@ self.assertEquals(row, {'f:bar': "baz"})
 
 """
 from _pychbase import _connection, _table
-CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+ZOOKEEPERS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
-connection = _connection(CLDBS)
+connection = _connection(ZOOKEEPERS)
 connection.delete_table(TABLE_NAME)
 connection.create_table(TABLE_NAME, {'f': {}})
 table = _table(connection, TABLE_NAME)
@@ -667,9 +667,9 @@ table.row('test')
 # TODO WEIRD SEGFUALT
 """
 from _pychbase import _connection, _table
-CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+ZOOKEEPERS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
-connection = _connection(CLDBS)
+connection = _connection(ZOOKEEPERS)
 connection.delete_table(TABLE_NAME)
 connection.create_table(TABLE_NAME, {'f': {}})
 table = _table(connection, TABLE_NAME)
@@ -680,9 +680,9 @@ connection.delete_table(TABLE_NAME) # fails here
 
 
 from _pychbase import _connection, _table
-CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+ZOOKEEPERS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
-connection = _connection(CLDBS)
+connection = _connection(ZOOKEEPERS)
 connection.delete_table(TABLE_NAME)
 connection.create_table(TABLE_NAME, {'f': {}})
 table = _table(connection, TABLE_NAME)
@@ -703,9 +703,9 @@ table.put("test", {"f:foo": "bar"})
 
 """
 from _pychbase import _connection, _table
-CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+ZOOKEEPERS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
-connection = _connection(CLDBS)
+connection = _connection(ZOOKEEPERS)
 connection.delete_table(TABLE_NAME)
 connection.create_table(TABLE_NAME, {'f': {}})
 table = _table(connection, TABLE_NAME)
@@ -728,9 +728,9 @@ for k, v in table.scan():
 """
 from datetime import datetime
 from _pychbase import _connection, _table
-CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+ZOOKEEPERS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
-connection = _connection(CLDBS)
+connection = _connection(ZOOKEEPERS)
 connection.delete_table(TABLE_NAME)
 connection.create_table(TABLE_NAME, {'f': {}})
 table = _table(connection, TABLE_NAME)
@@ -746,12 +746,12 @@ print e - s
 
 from datetime import datetime
 from _pychbase import _connection, _table
-CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+ZOOKEEPERS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
 
 
 for i in range(10000):
-    connection = _connection(CLDBS)
+    connection = _connection(ZOOKEEPERS)
     connection.delete_table(TABLE_NAME)
     connection.create_table(TABLE_NAME, {'f': {}})
     table = _table(connection, TABLE_NAME)
@@ -768,9 +768,9 @@ for i in range(10000):
 
 from datetime import datetime
 from _pychbase import _connection, _table
-CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+ZOOKEEPERS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
-connection = _connection(CLDBS)
+connection = _connection(ZOOKEEPERS)
 connection.delete_table(TABLE_NAME)
 connection.create_table(TABLE_NAME, {'f': {}})
 table = _table(connection, TABLE_NAME)
@@ -783,9 +783,9 @@ print e - s
 
 from datetime import datetime
 from _pychbase import _connection, _table
-CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+ZOOKEEPERS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
-connection = _connection(CLDBS)
+connection = _connection(ZOOKEEPERS)
 connection.delete_table(TABLE_NAME)
 connection.create_table(TABLE_NAME, {'f': {}})
 table = _table(connection, TABLE_NAME)
@@ -809,9 +809,9 @@ table.put("test", {"f:foo": "bar"})
 
 """
 from _pychbase import _connection, _table
-CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+ZOOKEEPERS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
-connection = _connection(CLDBS)
+connection = _connection(ZOOKEEPERS)
 #lol = {''.join(['a' for _ in range(5)]): {}}
 connection.delete_table(TABLE_NAME)
 connection.create_table(TABLE_NAME, {'f': {}})
@@ -830,9 +830,9 @@ table.batch(actions)
 
 """
 from _pychbase import _connection, _table
-CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+ZOOKEEPERS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
-connection = _connection(CLDBS)
+connection = _connection(ZOOKEEPERS)
 #lol = {''.join(['a' for _ in range(5)]): {}}
 connection.delete_table(TABLE_NAME)
 connection.create_table(TABLE_NAME, {''.join(['a' for _ in range(10000)]): {}})
@@ -840,9 +840,9 @@ connection.create_table(TABLE_NAME, {'aaaaa': {}})
 #connection.create_table(TABLE_NAME, {'f': {}})
 
 from _pychbase import _connection, _table
-CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+ZOOKEEPERS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
-connection = _connection(CLDBS)
+connection = _connection(ZOOKEEPERS)
 connection.delete_table(TABLE_NAME)
 connection.create_table(TABLE_NAME, {'f': {'max_versions': 1}})
 

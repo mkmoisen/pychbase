@@ -313,11 +313,6 @@ static PyTypeObject FooType = {
 };
 
 
-
-// TODO eliminate these
-static const char *cldbs = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222";
-static const char *tableName = "/app/SubscriptionBillingPlatform/testInteractive";
-
 /*
 static const char *family1 = "Id";
 static const char *col1_1  = "I";
@@ -402,7 +397,7 @@ connection.is_open()
 
 typedef struct {
     PyObject_HEAD
-    PyObject *cldbs;
+    PyObject *zookeepers;
     // Add an is_open boolean
     bool is_open;
     hb_connection_t conn;
@@ -441,8 +436,8 @@ static PyObject *Connection_close(Connection *self) {
 static void Connection_dealloc(Connection *self) {
     Connection_close(self);
     //printf("after connection close\n");
-    Py_XDECREF(self->cldbs);
-    //printf("after xdecref cldbs\n");
+    Py_XDECREF(self->zookeepers);
+    //printf("after xdecref zookeepers\n");
     self->ob_type->tp_free((PyObject *) self);
     //printf("after tp_free\n");
     // I don't think I need to Py_XDECREF on conn and client?
@@ -453,28 +448,26 @@ static void Connection_dealloc(Connection *self) {
 
 
 static int Connection_init(Connection *self, PyObject *args, PyObject *kwargs) {
-    PyObject *cldbs, *tmp;
+    PyObject *zookeepers, *tmp;
 
     // Add an is_open boolean
-    if (!PyArg_ParseTuple(args, "S", &cldbs)) {
+    if (!PyArg_ParseTuple(args, "O", &zookeepers)) {
         return -1;
     }
 
     // I'm not sure why tmp is necessary but it was in the docs
-    tmp = self->cldbs;
-    Py_INCREF(cldbs);
-    self->cldbs = cldbs;
+    tmp = self->zookeepers;
+    Py_INCREF(zookeepers);
+    self->zookeepers = zookeepers;
     Py_XDECREF(tmp);
 
     self->admin = NULL;
-
-    // Todo make CLDBS optional, and then find it from /opt/mapr/conf
 
     return 0;
 }
 
 static PyMemberDef Connection_members[] = {
-    {"cldbs", T_OBJECT_EX, offsetof(Connection, cldbs), 0, "The cldbs connection string"},
+    {"zookeepers", T_OBJECT_EX, offsetof(Connection, zookeepers), 0, "The zookeepers connection string"},
     {NULL}
 };
 
@@ -492,7 +485,7 @@ connection = pychbase._connection("abc")
 connection.open()
 connection.is_open()
 connection.close()
-connection.cldbs = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+connection.zookeepers = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
 connection.open()
 connection.is_open()
 
@@ -501,9 +494,9 @@ table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testIntera
 static PyObject *Connection_open(Connection *self) {
     if (!self->is_open) {
         int err = 0;
-        err = hb_connection_create(PyString_AsString(self->cldbs), NULL, &self->conn);
+        err = hb_connection_create(PyString_AsString(self->zookeepers), NULL, &self->conn);
         if (err != 0) {
-            PyErr_Format(PyExc_ValueError, "Could not connect using CLDBS '%s': %i", self->cldbs, err);
+            PyErr_Format(PyExc_ValueError, "Could not connect using zookeepers '%s': %i", self->zookeepers, err);
             return NULL;
         }
         //OOM_OBJ_RETURN_NULL(self->conn);
