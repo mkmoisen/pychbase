@@ -475,28 +475,30 @@ class TestCTableBatch(unittest.TestCase):
         errors, results = self.table.batch([])
         self.assertEquals(errors, 0)
 
-"""
+
 class TestPython(unittest.TestCase):
     def setUp(self):
         pass
 
     def tearDown(self):
-        connection = _connection(CLDBS)
+        connection = Connection(CLDBS)
         try:
             connection.delete_table(TABLE_NAME)
         except ValueError:
             pass
+
+        connection.close()
 
     def test_happy(self):
         connection = Connection(CLDBS)
         connection.create_table(TABLE_NAME, {'f': {}})
         table = connection.table(TABLE_NAME)
         for i in range(0, 10):
-            table.put("a{}".format(i), {"f:foo{}".format(i): "bar".format(i)})
+            table.put("a{}".format(i), {"f:foo{}".format(i): "bar{}".format(i)})
 
         self.assertEquals(table.row("a0"), {"f:foo0": "bar0"})
-        self.assertEquals(table.row("a4"), {"f:foo0": "bar4"})
-        self.assertEquals(table.row("a9"), {"f:foo0": "bar9"})
+        self.assertEquals(table.row("a4"), {"f:foo4": "bar4"})
+        self.assertEquals(table.row("a9"), {"f:foo9": "bar9"})
 
         i = 0
         for row_key, obj in table.scan():
@@ -504,7 +506,7 @@ class TestPython(unittest.TestCase):
             self.assertEquals(obj, {"f:foo{}".format(i): "bar{}".format(i)})
             i += 1
 
-        self.assertEquals(i, 9)
+        self.assertEquals(i, 10)
 
         i = 1
         for row_key, obj in table.scan(start="a1"):
@@ -532,8 +534,8 @@ class TestPython(unittest.TestCase):
 
         table.delete("a0")
         table.delete("a9")
-        self.assertEquals("a0", {})
-        self.assertEquals("a9", {})
+        self.assertEquals(table.row("a0"), {})
+        self.assertEquals(table.row("a9"), {})
 
         batch = table.batch()
         for i in range(1000):
@@ -543,9 +545,25 @@ class TestPython(unittest.TestCase):
         for row_key, obj in table.scan(start='test', stop='test~'):
             i += 1
 
+        self.assertEquals(i, 0)
+
+        batch.send()
+
+        i = 0
+        for row_key, obj in table.scan(start='test', stop='test~'):
+            i += 1
+
         self.assertEquals(i, 1000)
 
-"""
+        table.delete_prefix("test")
+
+        i = 0
+        for row_key, obj in table.scan(start='test', stop='test~'):
+            i += 1
+
+        self.assertEquals(i, 0)
+
+
 
 
 if __name__ == '__main__':
@@ -688,11 +706,34 @@ connection.delete_table(TABLE_NAME)
 connection.create_table(TABLE_NAME, {'f': {}})
 table = _table(connection, TABLE_NAME)
 
-lol = [('put', 'hello{}'.format(i), {'f:bar':'bar{}'.format(i)}) for i in range(10)]
+lol = [('put', 'hello{}'.format(i), {'f:bar':'bar{}'.format(i)}) for i in range(1000000)]
 s = datetime.now()
 table.batch(lol, True)
 e = datetime.now()
 print e - s
+
+
+
+
+from datetime import datetime
+from _pychbase import _connection, _table
+CLDBS = "hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222"
+TABLE_NAME = '/app/SubscriptionBillingPlatform/testpymaprdb'
+
+
+for i in range(10000):
+    connection = _connection(CLDBS)
+    connection.delete_table(TABLE_NAME)
+    connection.create_table(TABLE_NAME, {'f': {}})
+    table = _table(connection, TABLE_NAME)
+    #connection.close()
+
+
+
+
+
+
+
 
 
 

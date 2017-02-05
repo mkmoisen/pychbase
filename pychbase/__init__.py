@@ -27,6 +27,9 @@ class Connection(object):
     def create_table(self, table_name, column_families):
         self._connection.create_table(table_name, column_families)
 
+    def delete_table(self, table_name):
+        self._connection.delete_table(table_name)
+
     def close(self):
         self._connection.close()
 
@@ -35,7 +38,7 @@ class Table(object):
     def __init__(self, connection, table_name):
         self.connection = connection
         self.table_name = table_name
-        self._table = _table(connection, table_name)
+        self._table = _table(connection._connection, table_name)
 
     def row(self, row_key):
         return self._table.row(row_key)
