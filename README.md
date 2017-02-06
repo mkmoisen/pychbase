@@ -18,6 +18,15 @@ E.g,
 
 # Installation on a MapR environment
 
+You can install it through `pip` if you are using MapR. Note that it will build the C from source.
+
+    virtualenv pychbase
+    cd pychbase
+    source bin/activate
+    pip install pychbase
+
+Or you can build it from source like the following:
+
     virtualenv pychbase
     cd pychbase
     source bin/activate
@@ -26,6 +35,8 @@ E.g,
     python setup.py install
 
 # Installation on a non-MapR environment
+
+Currently, `pip` will only work if you are on a MapR environment. Otherwise, it will fail.
 
 The current `setup.py` script assumes a MapR environment. If you are not on MapR, you'll have to remove the mentions of MapR in the setup.py file, notably these strings:
 
@@ -133,6 +144,13 @@ It is the users duty to escap null terminators before attempting to batch/put da
     obj = table.row('foo')
     assert obj == {'f:foo\\0bar': 'baz\00bak'}
 
+# Happybase compatibility
+
+One goal of this library is to maintain compatibility with the APIs in HappyBase.
+
+Check out __init__.py to understand which features of HappyBase I have not yet implemented.
+
+In the future, I will force print warnings to stderr in the event a user uses an unimplemented feature.
 
 # License
 MIT
