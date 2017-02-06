@@ -21,7 +21,6 @@ E.g,
     virtualenv pychbase
     cd pychbase
     source bin/activate
-    pip install nose
     git clone https://github.com/mkmoisen/pychbase.git
     cd pychbase
     python setup.py install
@@ -41,9 +40,19 @@ Once you find the directory for `hbase.h`, replace the `/opt/mapr/include` in `s
 
 # Run the tests
 
-Currently you will have to open `tests.py` and replace the `ZOOKEEPERS` and `TABLE_NAME` constants with those in your environment. Afterwords, just run
+The `config.py` file in the `tests` directory has two constants, `ZOOKEEPER` and `TABLE_NAME`, that probably won't work if you run the tests.
 
-    python tests.py  # nosetests -v
+Create a `tests/local_config.py` file like the following:
+
+    ZOOKEEPERS = 'localhost:7222'
+    TABLE_NAME = 'testpychbase'
+
+To run the tests, make sure to be in the `tests` directory, or else you will face import problems:
+
+    cd tests
+    python tests.py
+
+Currently `nosetests` will not work without facing an import issue.
 
 # Usage
 

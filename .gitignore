@@ -1,2 +1,4 @@
 .pyc
 .idea/
+tests/local_config.py
+tests/adhoc.py

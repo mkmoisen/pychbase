@@ -1,0 +1,1 @@
+/apps/valgrind/bin/valgrind --tool=helgrind --suppressions=valgrind-python.supp python -E -tt tests.py > helgrind.out 2>&1
