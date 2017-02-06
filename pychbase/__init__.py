@@ -27,7 +27,7 @@ class Connection(object):
         statements = first_line.split()
         return ','.join(zookeeper for zookeeper in statements if ':' in zookeeper)
 
-    def table(self, table_name):
+    def table(self, table_name, *args, **kwargs):
         return Table(self, table_name)
 
     def __enter__(self):
@@ -36,14 +36,20 @@ class Connection(object):
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
 
-    def create_table(self, table_name, column_families):
-        self._connection.create_table(table_name, column_families)
+    def create_table(self, name, families):
+        self._connection.create_table(name, families)
 
-    def delete_table(self, table_name):
+    def delete_table(self, table_name, *args, **kwargs):
         self._connection.delete_table(table_name)
+
+    def open(self):
+        pass
 
     def close(self):
         self._connection.close()
+
+    def __del__(self):
+        self.close()
 
 
 class Table(object):
@@ -52,22 +58,22 @@ class Table(object):
         self.table_name = table_name
         self._table = _table(connection._connection, table_name)
 
-    def row(self, row):
+    def row(self, row, *args, **kwargs):
         return self._table.row(row)
 
-    def put(self, row, data):
+    def put(self, row, data, *args, **kwargs):
         return self._table.put(row, data)
 
-    def delete(self, row):
+    def delete(self, row, *args, **kwargs):
         return self._table.delete(row)
 
-    def scan(self, start='', stop=''):
+    def scan(self, start='', stop='', *args, **kwargs):
         # Should start and stop default to None ?
         # TODO Add filters
         for k, v in self._table.scan(start, stop):
             yield k, v
 
-    def delete_prefix(self, rowkey_prefix):
+    def delete_prefix(self, rowkey_prefix, *args, **kwargs):
         delete_count = 0
         batch = self.batch()
         for row_key, obj in self.scan(rowkey_prefix, rowkey_prefix + '~'):
@@ -82,22 +88,22 @@ class Table(object):
     def close(self):
         self.connection.close()
 
-    def batch(self, batch_size=None):
-        return Batch(self, batch_size)
+    def batch(self, timestamp=None, batch_size=None, *args, **kwargs):
+        return Batch(self, timestamp, batch_size)
 
 
 class Batch(object):
-    def __init__(self, table, batch_size=None):
+    def __init__(self, table, timestamp=None, batch_size=None, *args, **kwargs):
         self.table = table
         self._actions = []
         self._batch_size = batch_size
 
-    def put(self, row_key, data):
-        self._actions.append(('put', row_key, data))
+    def put(self, row, data, *args, **kwargs):
+        self._actions.append(('put', row, data))
         self._check_send()
 
-    def delete(self, row_key):
-        self._actions.append(('delete', row_key))
+    def delete(self, row, *args, **kwargs):
+        self._actions.append(('delete', row))
         self._check_send()
 
     def _check_send(self):
