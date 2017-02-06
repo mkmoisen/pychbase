@@ -325,6 +325,8 @@ static const char *col3_1  = "City";
 
 /*
 Given a family and a qualifier, return a fully qualified column (familiy + ":" + qualifier)
+Returns NULL on failure
+Caller must free the return value
 */
 
 static char *hbase_fqcolumn(const hb_cell_t *cell) {
@@ -339,7 +341,6 @@ static char *hbase_fqcolumn(const hb_cell_t *cell) {
 
 
     // +1 for null terminator, +1 for colon
-    //TODO This one is probably correct
     char *fq = (char *) malloc(1 + 1 + family_len + qualifier_len);
     if (!fq) {
         return NULL;
@@ -355,7 +356,16 @@ static char *hbase_fqcolumn(const hb_cell_t *cell) {
 }
 
 
+/*
+* libhbase uses asyncronous threads. The data that will be sent to HBase must remain in memory until
+* the callback has been executed, at which point the data can safely be cleared.
+* The RowBuffer class is used to hold the data in memory.
+* Make sure to clear it on exactly two conditions:
+* Any exit point in the callback, including success and failures
+* Any failure exit point in a function that invokes an async libhbase function, before the function is invoked
+*/
 struct RowBuffer {
+    // Vectors allow fast insert/delete from the end
     std::vector<char *> allocedBufs;
 
     RowBuffer() {
@@ -367,8 +377,6 @@ struct RowBuffer {
             char *buf = allocedBufs.back();
             allocedBufs.pop_back();
             delete [] buf;
-            // It looks like these do the same thing? What is the difference between free and delete [] here?
-            //free(buf);
         }
     }
 
@@ -377,8 +385,7 @@ struct RowBuffer {
         allocedBufs.push_back(newAlloc);
         return newAlloc;
     }
-    //PyObject *ret;
-    //PyObject *rets;
+
 };
 
 
@@ -392,8 +399,6 @@ connection.is_open()
 connection.close()
 connection.is_open()
 */
-
-
 
 typedef struct {
     PyObject_HEAD
@@ -423,10 +428,10 @@ static PyObject *Connection_close(Connection *self) {
             printf("admin is not null\n");
         }
         */
-        //TODO this is causing a seg fault?
-        printf("before admin destroy\n");
+        //TODO this is causing a seg fault in the system tests
+        //printf("before admin destroy\n");
         //hb_admin_destroy(self->admin, admin_disconnection_callback, NULL);
-        printf("after admin destroy\n");
+        //printf("after admin destroy\n");
         self->admin = NULL;
         hb_client_destroy(self->client, cl_dsc_cb, NULL);
         hb_connection_destroy(self->conn);
@@ -441,12 +446,7 @@ static void Connection_dealloc(Connection *self) {
     Py_XDECREF(self->zookeepers);
     //printf("after xdecref zookeepers\n");
     self->ob_type->tp_free((PyObject *) self);
-    //printf("after tp_free\n");
-    // I don't think I need to Py_XDECREF on conn and client?
 }
-
-// I'm going to skip Connection_new
-// remember to FooType.tp_new = PyType_GenericNew;
 
 
 static int Connection_init(Connection *self, PyObject *args, PyObject *kwargs) {
@@ -501,23 +501,22 @@ static PyObject *Connection_open(Connection *self) {
             PyErr_Format(PyExc_ValueError, "Could not connect using zookeepers '%s': %i", self->zookeepers, err);
             return NULL;
         }
-        //OOM_OBJ_RETURN_NULL(self->conn);
 
         err = hb_client_create(self->conn, &self->client);
-        OOM_OBJ_RETURN_NULL(self->client);
         if (err != 0) {
             PyErr_SetString(HBaseError, "Could not create client from connection");
             return NULL;
         }
+        OOM_OBJ_RETURN_NULL(self->client);
 
         //("before admin create\n");
         err = hb_admin_create(self->conn, &self->admin);
         //printf("after admin create\n");
-        OOM_OBJ_RETURN_NULL(self->admin);
         if (err != 0) {
             PyErr_SetString(PyExc_ValueError, "Could not create admin from connection");
             return NULL;
         }
+        OOM_OBJ_RETURN_NULL(self->admin);
 
         self->is_open = true;
     }
@@ -541,16 +540,6 @@ import pychbase
 connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
 connection.open()
 connection.create_table("/app/SubscriptionBillingPlatform/testpymaprdb21", {'f1': {}})
-
-
-connection.create_table_wtf("/app/SubscriptionBillingPlatform/testpymaprdb20", {'f1': 'a'})
-
-
-
-
-connection.create_table_wtf("/app/SubscriptionBillingPlatform/testpymaprdb11", ['hello'])
-
-
 */
 
 static PyObject *Connection_delete_table(Connection *self, PyObject *args) {
@@ -564,7 +553,6 @@ static PyObject *Connection_delete_table(Connection *self, PyObject *args) {
     if (!self->is_open) {
         Connection_open(self);
     }
-
 
     int table_name_length = strlen(table_name);
     if (table_name_length > 1000) {
@@ -580,15 +568,12 @@ static PyObject *Connection_delete_table(Connection *self, PyObject *args) {
         PyErr_Format(PyExc_ValueError, "Table '%s' does not exist\n", table_name);
         return NULL;
     }
-    //printf("before admin table delete\n");
+
     err = hb_admin_table_delete(self->admin, name_space, table_name);
-    //printf("after admin table delete\n");
     if (err != 0) {
-        PyErr_Format(HBaseError, "Failed to delete table '%s'\n", table_name);
+        PyErr_Format(HBaseError, "Failed to delete table '%s': %i\n", table_name, err);
         return NULL;
     }
-
-
 
     Py_RETURN_NONE;
 }

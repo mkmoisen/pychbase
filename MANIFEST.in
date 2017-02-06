@@ -1,3 +1,4 @@
 include LICENSE
+include tests.py
 exclude .git
 exclude .idea

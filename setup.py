@@ -12,15 +12,27 @@ module1 = Extension('_pychbase',
 here = path.abspath(path.dirname(__file__))
 
 try:
-    with open(path.join(here, 'README.rst'), encoding='utf-8') as f:
-        long_description = f.read()
-except IOError:
-    long_description = 'A Python wrapper for the libhbase C API to HBase'
+    import requests
+    def read_md(file_name):
+        try:
+            r = requests.post(url='http://c.docverter.com/convert',
+                              data={'to': 'rst', 'from': 'markdown'},
+                              files={'input_files[]': open(file_name, 'rb')})
+            if not r.ok:
+                raise Exception(r.text)
+            return r.text
+        except Exception as ex:
+            print ex
+            return open(file_name, 'r').read()
+except ImportError:
+    print("requests module not available-- cannot convert MD to RST")
+    read_md = lambda file_name: open(file_name, 'r').read()
+
 
 setup(name='pychbase',
-      version='0.1',
+      version='0.1.1',
       description='A Python wrapper for the libhbase C API to HBase',
-      long_description=long_description,
+      long_description=read_md('README.md'),
       url='https://github.com/mkmoisen/pychbase',
       download_url='https://github.com/mkmoisen/pychbase/tarball/0.1',
       author='Matthew Moisen',
