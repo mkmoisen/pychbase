@@ -4,6 +4,7 @@ from codecs import open
 
 here = path.abspath(path.dirname(__file__))
 
+long_description = 'A Python wrapper for the libhbase C API to HBase'
 try:
     import requests
     def read_md(file_name):
@@ -19,7 +20,13 @@ try:
             return open(file_name, 'r').read()
 except ImportError:
     print("requests module not available-- cannot convert MD to RST")
-    read_md = lambda file_name: open(file_name, 'r').read()
+    def read_md(file_name):
+        try:
+            with open(file_name, 'r') as f:
+                return f.read()
+        except IOError:
+            return long_description
+
 
 
 module1 = Extension('pychbase._pychbase',
@@ -29,8 +36,8 @@ module1 = Extension('pychbase._pychbase',
                     library_dirs=['/opt/mapr/lib','/usr/lib/jvm/jre-1.7.0/lib/amd64/server/'])
 
 setup(name='pychbase',
-      version='0.1.1',
-      description='A Python wrapper for the libhbase C API to HBase',
+      version='0.1.2',
+      description=long_description,
       long_description=read_md('README.md'),
       url='https://github.com/mkmoisen/pychbase',
       download_url='https://github.com/mkmoisen/pychbase/tarball/0.1',
