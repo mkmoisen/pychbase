@@ -9,9 +9,14 @@ try:
     import requests
     def read_md(file_name):
         try:
+            with open(file_name, 'r') as f:
+                contents = f.read()
+        except IOError as ex:
+            return long_description
+        try:
             r = requests.post(url='http://c.docverter.com/convert',
                               data={'to': 'rst', 'from': 'markdown'},
-                              files={'input_files[]': open(file_name, 'rb')})
+                              files={'input_files[]': contents})
             if not r.ok:
                 raise Exception(r.text)
             return r.text
@@ -19,10 +24,10 @@ try:
             print ex
             return open(file_name, 'r').read()
 except ImportError:
-    print("requests module not available-- cannot convert MD to RST")
     def read_md(file_name):
         try:
             with open(file_name, 'r') as f:
+                print("requests module not available-- cannot convert MD to RST")
                 return f.read()
         except IOError:
             return long_description
@@ -36,7 +41,7 @@ module1 = Extension('pychbase._pychbase',
                     library_dirs=['/opt/mapr/lib','/usr/lib/jvm/jre-1.7.0/lib/amd64/server/'])
 
 setup(name='pychbase',
-      version='0.1.2',
+      version='0.1.3',
       description=long_description,
       long_description=read_md('README.md'),
       url='https://github.com/mkmoisen/pychbase',
