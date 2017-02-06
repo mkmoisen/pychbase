@@ -415,24 +415,15 @@ static void cl_dsc_cb(int32_t err, hb_client_t client, void *extra) {
 }
 
 void admin_disconnection_callback(int32_t err, hb_admin_t admin, void *extra){
-    printf("*****************************************************************admin_dc_cb: err = %d\n", err);
+    //printf("*****************************************************************admin_dc_cb: err = %d\n", err);
 }
 
 static PyObject *Connection_close(Connection *self) {
     if (self->is_open) {
-        /*
-        printf("In connection close\n");
-        if (!self->admin) {
-            printf("admin is null\n");
-        } else {
-            printf("admin is not null\n");
-        }
-        */
-        //TODO this is causing a seg fault in the system tests
-        //printf("before admin destroy\n");
-        //hb_admin_destroy(self->admin, admin_disconnection_callback, NULL);
-        //printf("after admin destroy\n");
-        self->admin = NULL;
+
+        // this used to cause a segfault, I'm not sure why it doesn't now
+        hb_admin_destroy(self->admin, admin_disconnection_callback, NULL);
+
         hb_client_destroy(self->client, cl_dsc_cb, NULL);
         hb_connection_destroy(self->conn);
         self->is_open = false;
@@ -442,9 +433,7 @@ static PyObject *Connection_close(Connection *self) {
 
 static void Connection_dealloc(Connection *self) {
     Connection_close(self);
-    //printf("after connection close\n");
     Py_XDECREF(self->zookeepers);
-    //printf("after xdecref zookeepers\n");
     self->ob_type->tp_free((PyObject *) self);
 }
 
@@ -462,8 +451,6 @@ static int Connection_init(Connection *self, PyObject *args, PyObject *kwargs) {
     Py_INCREF(zookeepers);
     self->zookeepers = zookeepers;
     Py_XDECREF(tmp);
-
-    self->admin = NULL;
 
     return 0;
 }
@@ -509,9 +496,7 @@ static PyObject *Connection_open(Connection *self) {
         }
         OOM_OBJ_RETURN_NULL(self->client);
 
-        //("before admin create\n");
         err = hb_admin_create(self->conn, &self->admin);
-        //printf("after admin create\n");
         if (err != 0) {
             PyErr_SetString(PyExc_ValueError, "Could not create admin from connection");
             return NULL;
@@ -561,9 +546,8 @@ static PyObject *Connection_delete_table(Connection *self, PyObject *args) {
     }
 
     int err;
-    //printf("before admin table exists\n");
+
     err = hb_admin_table_exists(self->admin, NULL, table_name);
-    //printf("after admin table exists\n");
     if (err != 0) {
         PyErr_Format(PyExc_ValueError, "Table '%s' does not exist\n", table_name);
         return NULL;
@@ -601,9 +585,7 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
         return NULL;
     }
 
-    //printf("con create table before admin table exists\n");
     err = hb_admin_table_exists(self->admin, NULL, table_name);
-    //printf("concreate table after admin table exists\n");
     if (err == 0) {
         PyErr_Format(PyExc_ValueError, "Table '%s' already exists\n", table_name);
         return NULL;
@@ -622,9 +604,8 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
     hb_columndesc families[number_of_families];
 
     int counter = 0;
-    //printf("before outer loop\n");
+
     while (PyDict_Next(dict, &i, &column_family_name, &column_family_attributes)) {
-        //printf("inner loop\n");
 
         if (!PyObject_TypeCheck(column_family_name, &PyBaseString_Type)) {
             PyErr_SetString(PyExc_TypeError, "Key must be string");
@@ -691,9 +672,7 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
         counter++;
     }
 
-    //printf("before con create table table create\n");
     err = hb_admin_table_create(self->admin, NULL, table_name, families, number_of_families);
-    //printf("after con create table table create\n");
 
     for (counter = 0; counter < number_of_families; counter++) {
         hb_coldesc_destroy(families[counter]);
@@ -708,7 +687,6 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
 
         // Sometimes if it fails to create, the table still gets created but doesn't work?
         // Attempt to delete it
-        //printf("before pybuildvalue\n");
         PyObject *table_name_obj = Py_BuildValue("(s)", table_name);
         OOM_OBJ_RETURN_NULL(table_name_obj);
 
@@ -906,10 +884,7 @@ static int Table_init(Table *self, PyObject *args, PyObject *kwargs) {
         Connection_open(connection);
     }
 
-    //int err = hb_admin_table_exists(self->connection->admin, NULL, self->table_name);
-    //printf("before table_init create table table create\n");
     int err = hb_admin_table_exists(connection->admin, NULL, table_name);
-    //printf("after table_init create table table create\n");
     if (err != 0) {
         // Apparently in INIT methods I have to return -1, NOT NULL or else it won't work properly
         PyErr_Format(PyExc_ValueError, "Table '%s' does not exist", table_name);
@@ -991,7 +966,6 @@ static int read_result(hb_result_t result, PyObject *dict) {
             return 12; //ENOMEM Cannot allocate memory
         }
 
-        //printf("keys ref count is %i\n", key->ob_refcnt);
         err = PyDict_SetItem(dict, key, value);
         if (err != 0) {
             // Is this check necessary?
@@ -1063,7 +1037,6 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
     // Do I need to dec ref? I don't know, memory isn't increasing when i run this in a loop
     PyObject *dict = PyDict_New();
     if (!dict) {
-        //printf("dict is null\n");
         pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->err = 12;
         call_back_buffer->count = 1;
@@ -1079,7 +1052,6 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
     err = read_result(result, dict);
 
     if (err != 0) {
-        //printf("read result was %i", call_back_buffer->err);
         pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->err = err;
         call_back_buffer->count = 1;
@@ -1297,7 +1269,6 @@ void put_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result
     CallBackBuffer *call_back_buffer = (CallBackBuffer *) extra;
 
     if (err != 0) {
-        //printf("MapR API Failed on Put Callback %i\n", err);
         pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->count = 1;
         call_back_buffer->err = err;
@@ -1456,7 +1427,6 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
         //strcpy(v, value_char);
 
         //err = create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family), qualifier, strlen(qualifier), v, strlen(v));
-        //printf("before dummy cell\n");
         err = create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family), qualifier, strlen(qualifier), value_char, strlen(value_char));
         if (err != 0) {
             return err;
@@ -1541,7 +1511,6 @@ static PyObject *Table_put(Table *self, PyObject *args) {
         return PyErr_NoMemory();
     }
 
-    //printf("before mutation send\n");
     // https://github.com/mapr/libhbase/blob/0ddda015113452955ed600116f58a47eebe3b24a/src/main/native/jni_impl/hbase_client.cc#L151
     // https://github.com/mapr/libhbase/blob/0ddda015113452955ed600116f58a47eebe3b24a/src/main/native/jni_impl/hbase_client.cc#L151
     // https://github.com/mapr/libhbase/blob/0ddda015113452955ed600116f58a47eebe3b24a/src/main/native/jni_impl/hbase_client.cc#L268
@@ -1563,7 +1532,6 @@ static PyObject *Table_put(Table *self, PyObject *args) {
         PyErr_Format(HBaseError, "Put failed to send: %i", err);
         return NULL;
     }
-    //printf("after mutation send\n");
 
     /*
     If client is null, flush will still invoke the callback and set the errno in call back
@@ -2340,7 +2308,6 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
             hb_put_t hb_put = NULL;
             err = make_put(self, rowBuf, row_key_char, dict, &hb_put, is_bufferable_bool);
-            //printf("dict ref count after make put %i\n", dict->ob_refcnt);
             if (err != 0) {
                 pthread_mutex_lock(&batch_call_back_buffer->mutex);
                 batch_call_back_buffer->errors++;
@@ -2359,10 +2326,7 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
             // The only time hb_mutation_send results in non-zero means the call back has NOT been invoked
             // So its safe and necessary to delete rowBuf
             err = hb_mutation_send(self->connection->client, (hb_mutation_t)hb_put, put_callback, call_back_buffer);
-            //printf("dict ref count after send %i\n", dict->ob_refcnt);
-            // TODO ADD the hb_put to the call back buffer and free it!
             if (err != 0) {
-                // TODO do I need to hb_mutation_destroy(hb_put) ?
                 pthread_mutex_lock(&batch_call_back_buffer->mutex);
                 batch_call_back_buffer->errors++;
                 batch_call_back_buffer->count++;
@@ -2445,7 +2409,6 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
         err = hb_client_flush(self->connection->client, client_flush_callback, NULL);
 
         if (err != 0) {
-            //printf("we have errors\n");
             // The documentation doesn't specify if this would ever return an error or why.
             // If this fails with an error and the call back is never invoked, my script would hang..
             // I'll temporarily raise an error until I can clarify this
