@@ -1,1 +1,1 @@
-/apps/valgrind/bin/valgrind --tool=memcheck --leak-check=full --show-reachable=yes --trace-children=yes --track-origins=yes --fair-sched=yes --suppressions=valgrind-python.supp python -E -tt python tests.py > valgrind.out 2>&1
+/apps/valgrind/bin/valgrind --tool=memcheck --leak-check=full --show-reachable=yes --trace-children=yes --track-origins=yes --fair-sched=yes --suppressions=valgrind-python.supp python -E -tt tests.py > valgrind.out 2>&1
