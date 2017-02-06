@@ -103,17 +103,40 @@ class TestCConnectionManageTable(unittest.TestCase):
         }})
         connection.delete_table(TABLE_NAME)
 
-
-    def test_max_version_bad(self):
+    def test_attrs_bad_key(self):
         connection = _connection(ZOOKEEPERS)
-        self.assertRaises(ValueError, connection.create_table, TABLE_NAME, {'f': {'max_versions': 'foo',}})
-        self.assertRaises(ValueError, connection.delete_table, TABLE_NAME)
-        self.assertRaises(ValueError, connection.create_table, TABLE_NAME, {'f': {'max_versions': 10000000000000000000}})
-        self.assertRaises(ValueError, connection.create_table, TABLE_NAME, {'f': 'not a dict'})
+        cfs = {'f': {
+            'max_versions': 1,
+            'min_versions': 1,
+            'time_to_live': 0,
+            'not a valid key': 0,
+        }}
+        self.assertRaises(ValueError, connection.create_table, TABLE_NAME, cfs)
 
-    def test_invalid_key(self):
+    def test_attrs_bad_value(self):
         connection = _connection(ZOOKEEPERS)
-        self.assertRaises(ValueError, connection.create_table, TABLE_NAME, {'f': {'foo': 'foo'}})
+        cfs = {'f': {
+            'max_versions': 1,
+            'min_versions': 1,
+            'time_to_live': 0,
+            'in_memory': 'not an int',
+        }}
+        self.assertRaises(TypeError, connection.create_table, TABLE_NAME, cfs)
+
+    def test_bad_key(self):
+        connection = _connection(ZOOKEEPERS)
+        cfs = {1: {
+            'max_versions': 1,
+            'min_versions': 1,
+            'time_to_live': 0,
+            'in_memory': 0,
+        }}
+        self.assertRaises(TypeError, connection.create_table, TABLE_NAME, cfs)
+
+    def test_bad_value(self):
+        connection = _connection(ZOOKEEPERS)
+        cfs = {'f': "not a dict"}
+        self.assertRaises(TypeError, connection.create_table, TABLE_NAME, cfs)
 
     def test_accept_unicode(self):
         connection = _connection(ZOOKEEPERS)
@@ -188,33 +211,79 @@ class TestCTablePut(unittest.TestCase):
             # Loop to check for buffer overflow error
             self.assertEquals(row, {'f:bar': "baz"})
 
-    def test_input_with_null(self):
-        self.table.put("foo", {"f:bar\0": "baz\0"})
+    def test_invalid_key(self):
+        self.assertRaises(TypeError, self.table.put, "foo", {10: "baz"})
+
+    def test_invalid_value(self):
+        self.assertRaises(TypeError, self.table.put, "foo", {"bar": 10})
+
+
+class TestCTablePutNull(unittest.TestCase):
+    def setUp(self):
+        self.connection = _connection(ZOOKEEPERS)
+        self.connection.create_table(TABLE_NAME, {'f': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+
+    def tearDown(self):
+        self.connection.delete_table(TABLE_NAME)
+        self.connection.close()
+
+    def test_input_with_null_as_final(self):
+        self.table.put("foo", {"f:bar\\0": "baz\\0"})
         row = self.table.row('foo')
-        self.assertEquals(row, {"f:bar\0": "baz\0"})
+        self.assertEquals(row, {"f:bar\\0": "baz\\0"})
+
+        self.table.put("bar", {"f:bar\0": "baz\0"})
+        row = self.table.row('bar')
+        self.assertEquals(row, {"f:bar": "baz"})
+
+    def test_input_with_null_in_middle(self):
+        self.table.put("foo", {"f:bar\\0baz": "baz\\0foo"})
+        row = self.table.row('foo')
+        self.assertEquals(row, {"f:bar\\0baz": "baz\\0foo"})
 
         self.table.put("bar", {"f:bar\0baz": "baz\0foo"})
         row = self.table.row('bar')
-        self.assertEquals(row, {"f:bar\0baz": "baz\0foo"})
+        self.assertEquals(row, {"f:bar": "baz"})
 
-        self.table.put("bar\0", {"f:bar\0baz": "baz\0foo"})
-        row = self.table.row('bar\0')
-        self.assertEquals(row, {"f:bar\0baz": "baz\0foo"})
+    def test_input_with_null_as_final_rowkey(self):
+        self.table.put("bar\\0", {"f:bar\\0baz": "baz\\0foo"})
+        row = self.table.row('bar\\0')
+        self.assertEquals(row, {"f:bar\\0baz": "baz\\0foo"})
 
-        self.table.put("bar\0foo", {"f:bar\0baz": "baz\0foo"})
-        row = self.table.row('bar\0foo')
-        self.assertEquals(row, {"f:bar\0baz": "baz\0foo"})
+        self.assertRaises(TypeError, self.table.put, "bar\0", {"f:foo": "bar"})
 
-        i = 0
-        for row_key, obj in self.table.scan():
-            i += 1
+    def test_input_with_null_in_middle_rowkey(self):
+        self.table.put("bar\\0foo", {"f:bar\\0baz": "baz\\0foo"})
+        row = self.table.row('bar\\0foo')
+        self.assertEquals(row, {"f:bar\\0baz": "baz\\0foo"})
 
-        self.assertEquals(i, 4)
+        self.assertRaises(TypeError, self.table.put, "bar\0foo", {"f:foo": "bar"})
 
-    def test_input_with_xnull(self):
-        self.table.put("foo", {"f:bar\x00": "baz\x00"})
+    def test_input_with_xnull_as_final(self):
+        self.table.put("foo", {"f:bar\\x00": "baz\\x00"})
         row = self.table.row('foo')
-        self.assertEquals(row, {"f:bar\x00": "baz\x00"})
+        self.assertEquals(row, {"f:bar\\x00": "baz\\x00"})
+
+        self.table.put("bar", {"f:bar\x00": "baz\x00"})
+        row = self.table.row('bar')
+        self.assertEquals(row, {"f:bar": "baz"})
+
+    def test_input_with_xnull_in_middle(self):
+        self.table.put("foo", {"f:bar\\x00baz": "baz\\x00foo"})
+        row = self.table.row('foo')
+        self.assertEquals(row, {"f:bar\\x00baz": "baz\\x00foo"})
+
+        self.table.put("bar", {"f:bar\x00baz": "baz\x00foo"})
+        row = self.table.row('bar')
+        self.assertEquals(row, {"f:bar": "baz"})
+
+    def test_input_with_xnull_rowkey(self):
+        self.table.put("foo\\x00", {"f:bar\\x00": "baz\\x00"})
+        row = self.table.row('foo\\x00')
+        self.assertEquals(row, {"f:bar\\x00": "baz\\x00"})
+
+        self.assertRaises(TypeError, self.table.put, "bar\x00", {"f:foo": "bar"})
 
 
     def test_empty_put(self):

@@ -35,7 +35,7 @@ The current `setup.py` script assumes a MapR environment. If you are not on MapR
     '/opt/mapr/lib'
 
 However, you will need to hunt down the location of the `hbase.h` file that has hopefully been included with your distribution.
-I haven't yet had a chance to download Cloudera or Horton works and test it out.
+I haven't yet had a chance to download Cloudera or Horton works and test it out. If you try it and get it working, please raise an issue on Github and I will add it to this readme.
 
 Once you find the directory for `hbase.h`, replace the `/opt/mapr/include` in `setup.py` with that directory
 
@@ -43,11 +43,7 @@ Once you find the directory for `hbase.h`, replace the `/opt/mapr/include` in `s
 
 Currently you will have to open `tests.py` and replace the `ZOOKEEPERS` and `TABLE_NAME` constants with those in your environment. Afterwords, just run
 
-    python tests.py
-
-or
-
-    nosetests -v
+    python tests.py  # nosetests -v
 
 # Usage
 
@@ -115,6 +111,19 @@ To batch delete:
         batch.delete(row_key)
 
     batch.delete()
+
+Note that attempting to batch/put unescaped null terminators will result in them being stripped.
+Attempting to use a row key with an unescaped null terminator will raise a TypeException.
+It is the users duty to escap null terminators before attempting to batch/put data.
+
+    table.put('foo', {'f:foo\0bar': 'baz\0bak'})
+    obj = table.row('foo')
+    assert obj == {'f:foo': 'baz'}
+
+    table.put('bar', {'f:foo\\0bar': 'baz\00bak'})
+    obj = table.row('foo')
+    assert obj == {'f:foo\\0bar': 'baz\00bak'}
+
 
 # License
 MIT

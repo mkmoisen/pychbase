@@ -2,13 +2,6 @@ from distutils.core import setup, Extension
 from os import path
 from codecs import open
 
-module1 = Extension('_pychbase',
-                    sources=['pychbase.cc'],
-                    include_dirs=['/opt/mapr/include'],
-                    libraries=['MapRClient','jvm'],
-                    library_dirs=['/opt/mapr/lib','/usr/lib/jvm/jre-1.7.0/lib/amd64/server/'])
-
-
 here = path.abspath(path.dirname(__file__))
 
 try:
@@ -28,6 +21,12 @@ except ImportError:
     print("requests module not available-- cannot convert MD to RST")
     read_md = lambda file_name: open(file_name, 'r').read()
 
+
+module1 = Extension('_pychbase',
+                    sources=['pychbase.cc'],
+                    include_dirs=['/opt/mapr/include'],
+                    libraries=['MapRClient','jvm'],
+                    library_dirs=['/opt/mapr/lib','/usr/lib/jvm/jre-1.7.0/lib/amd64/server/'])
 
 setup(name='pychbase',
       version='0.1.1',

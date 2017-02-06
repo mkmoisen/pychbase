@@ -52,14 +52,14 @@ class Table(object):
         self.table_name = table_name
         self._table = _table(connection._connection, table_name)
 
-    def row(self, row_key):
-        return self._table.row(row_key)
+    def row(self, row):
+        return self._table.row(row)
 
-    def put(self, row_key, data):
-        return self._table.put(row_key, data)
+    def put(self, row, data):
+        return self._table.put(row, data)
 
-    def delete(self, row_key):
-        return self._table.delete(row_key)
+    def delete(self, row):
+        return self._table.delete(row)
 
     def scan(self, start='', stop=''):
         # Should start and stop default to None ?
@@ -82,8 +82,8 @@ class Table(object):
     def close(self):
         self.connection.close()
 
-    def batch(self):
-        return Batch(self)
+    def batch(self, batch_size=None):
+        return Batch(self, batch_size)
 
 
 class Batch(object):
