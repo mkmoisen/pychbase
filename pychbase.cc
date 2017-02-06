@@ -424,7 +424,9 @@ static PyObject *Connection_close(Connection *self) {
         }
         */
         //TODO this is causing a seg fault?
+        printf("before admin destroy\n");
         //hb_admin_destroy(self->admin, admin_disconnection_callback, NULL);
+        printf("after admin destroy\n");
         self->admin = NULL;
         hb_client_destroy(self->client, cl_dsc_cb, NULL);
         hb_connection_destroy(self->conn);
