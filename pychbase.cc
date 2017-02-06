@@ -794,7 +794,6 @@ struct BatchCallBackBuffer;
 
 struct CallBackBuffer {
     RowBuffer *rowBuf;
-    Table *table;
     int err;
     PyObject *ret;
     uint64_t count;
@@ -802,8 +801,7 @@ struct CallBackBuffer {
     BatchCallBackBuffer *batch_call_back_buffer;
     //PyObject *rets;
     // TODO I don't require the Table *t anymore right?
-    CallBackBuffer(Table *t, RowBuffer *r, BatchCallBackBuffer *bcbb) {
-        table = t;
+    CallBackBuffer(RowBuffer *r, BatchCallBackBuffer *bcbb) {
         rowBuf = r;
         err = 0;
         count = 0;
@@ -1133,7 +1131,7 @@ static PyObject *Table_row(Table *self, PyObject *args) {
          return PyErr_NoMemory();
     }
 
-    CallBackBuffer *call_back_buffer = new CallBackBuffer(self, row_buff, NULL);
+    CallBackBuffer *call_back_buffer = new CallBackBuffer(row_buff, NULL);
     if (!call_back_buffer) {
         hb_get_destroy(get);
         delete row_buff;
@@ -1467,7 +1465,7 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     RowBuffer *row_buf = new RowBuffer();
     OOM_OBJ_RETURN_NULL(row_buf);
 
-    CallBackBuffer *call_back_buffer = new CallBackBuffer(self, row_buf, NULL);
+    CallBackBuffer *call_back_buffer = new CallBackBuffer(row_buf, NULL);
     if (!call_back_buffer) {
         delete row_buf;
         return PyErr_NoMemory();
@@ -1856,7 +1854,7 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
         return PyErr_NoMemory();
     }
 
-    CallBackBuffer *call_back_buffer = new CallBackBuffer(self, row_buf, NULL);
+    CallBackBuffer *call_back_buffer = new CallBackBuffer(row_buf, NULL);
     if (!call_back_buffer) {
         delete row_buf;
         hb_scanner_destroy(scan, NULL, NULL);
@@ -2025,7 +2023,7 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
         return PyErr_NoMemory();
     }
 
-    CallBackBuffer *call_back_buffer = new CallBackBuffer(self, row_buf, NULL);
+    CallBackBuffer *call_back_buffer = new CallBackBuffer(row_buf, NULL);
     if (!call_back_buffer) {
         hb_mutation_destroy((hb_mutation_t) hb_delete);
         delete row_buf;
@@ -2137,7 +2135,7 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
             continue;
         }
 
-        CallBackBuffer *call_back_buffer = new CallBackBuffer(self, rowBuf, batch_call_back_buffer);
+        CallBackBuffer *call_back_buffer = new CallBackBuffer(rowBuf, batch_call_back_buffer);
         if (!call_back_buffer) {
             pthread_mutex_lock(&batch_call_back_buffer->mutex);
             batch_call_back_buffer->errors++;
