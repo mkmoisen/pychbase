@@ -1,4 +1,4 @@
-from _pychbase import _connection, _table, HBaseError
+from pychbase._pychbase import _connection, _table, HBaseError
 
 # TODO It would be cool to see if ld_library_path is set correctly?
 

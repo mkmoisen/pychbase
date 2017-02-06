@@ -22,7 +22,7 @@ except ImportError:
     read_md = lambda file_name: open(file_name, 'r').read()
 
 
-module1 = Extension('_pychbase',
+module1 = Extension('pychbase._pychbase',
                     sources=['pychbase.cc'],
                     include_dirs=['/opt/mapr/include'],
                     libraries=['MapRClient','jvm'],
