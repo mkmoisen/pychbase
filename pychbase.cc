@@ -1305,6 +1305,7 @@ void put_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result
 * Returns 0 on success
 * Returns 12 on OOM
 */
+/*
 static int create_dummy_cell(hb_cell_t **cell,
                       const char *r, size_t rLen,
                       const char *f, size_t fLen,
@@ -1329,6 +1330,19 @@ static int create_dummy_cell(hb_cell_t **cell,
     *cell = cell_ptr;
 
     return 0;
+}
+*/
+
+static int add_column_to_put(hb_put_t *hb_put,
+                      const char *family, size_t family_len,
+                      const char *qualifier, size_t qualifier_len,
+                      const char *value, size_t value_len) {
+    OOM_OBJ_RETURN_ERRNO(family);
+    OOM_OBJ_RETURN_ERRNO(qualifier);
+    OOM_OBJ_RETURN_ERRNO(value);
+    int err = hb_put_add_column(*hb_put, (byte_t *) family, family_len, (byte_t *) qualifier, qualifier_len, (byte_t *) value, value_len);
+
+    return err;
 }
 
 
@@ -1379,7 +1393,7 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
 
     PyObject *fq, *value;
     Py_ssize_t pos = 0;
-    hb_cell_t *cell;
+    //hb_cell_t *cell;
 
     // https://docs.python.org/2/c-api/dict.html?highlight=pydict_next#c.PyDict_Next
     // This says PyDict_Next borrows references for key and value...
@@ -1425,18 +1439,19 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
         //strcpy(v, value_char);
 
         //err = create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family), qualifier, strlen(qualifier), v, strlen(v));
-        err = create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family), qualifier, strlen(qualifier), value_char, strlen(value_char));
+        //err = create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family), qualifier, strlen(qualifier), value_char, strlen(value_char));
+        err = add_column_to_put(hb_put, family, strlen(family), qualifier, strlen(qualifier), value_char, strlen(value_char));
         if (err != 0) {
             return err;
         }
 
-        err = hb_put_add_cell(*hb_put, cell);;
-        if (err != 0) {
-            delete cell;
-            return err;
-        }
+        //err = hb_put_add_cell(*hb_put, cell);;
+        //if (err != 0) {
+        //    delete cell;
+        //    return err;
+        //}
 
-        delete cell;
+        //delete cell;
     }
 
     err = hb_mutation_set_table((hb_mutation_t)*hb_put, self->table_name, strlen(self->table_name));

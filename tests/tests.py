@@ -212,6 +212,72 @@ class TestCTablePut(unittest.TestCase):
     def test_invalid_value(self):
         self.assertRaises(TypeError, self.table.put, "foo", {"bar": 10})
 
+    def test_empty_put(self):
+        self.assertRaises(ValueError, self.table.put, 'foo', {})
+
+    def test_bad_column_family_no_colon(self):
+        #All keys in the put dict must contain a colon separating the family from the qualifier
+        self.assertRaises(ValueError, self.table.put, 'foo', {'bar': 'baz'})
+
+    def test_bad_colon_no_family(self):
+        self.assertRaises(ValueError, self.table.put, 'foo', {":bar": "baz", 'invalid:foo': 'bar'})
+        row = self.table.row('foo')
+        self.assertEquals(row, {})
+
+    def test_bad_colon_no_qualifier(self):
+        # LOL Apparently this is totaly fine
+        self.table.put('foo', {"f:": "baz"})
+        row = self.table.row('foo')
+        self.assertEquals(row, {"f:": "baz"})
+
+    def test_invalid_column_family(self):
+        self.assertRaises(ValueError, self.table.put, 'foo', {"f:bar": "baz", 'invalid:foo': 'bar'})
+        row = self.table.row('foo')
+        self.assertEquals(row, {})
+
+    def test_set(self):
+        self.assertRaises(TypeError, self.table.put, 'foo', {"f:bar", "baz"})
+        row = self.table.row('foo')
+        self.assertEquals(row, {})
+
+    def test_empty_value(self):
+        self.table.put("foo", {"f:bar": ""})
+        row = self.table.row('foo')
+        self.assertEquals(row, {'f:bar': ""})
+
+    def test_unicode(self):
+        self.table.put(u"foo", {u"f:bar": u"baz"})
+        row = self.table.row('foo')
+        self.assertEquals(row, {'f:bar': "baz"})
+
+    def test_big_value(self):
+        ## Greater than 1024
+        #raise NotImplementedError
+        self.table.put('foo', {'f:bar': ''.join(['a' for _ in range(10000)])})
+        row = self.table.row('foo')
+        self.assertEquals(row, {'f:bar': ''.join(['a' for _ in range(10000)])})
+
+    def test_big_qualifier(self):
+        ## Greater than 1024
+        self.table.put('foo', {'f:' + ''.join(['a' for _ in range(10000)]): 'baz'})
+        row = self.table.row('foo')
+        self.assertEquals(row, {'f:' + ''.join(['a' for _ in range(10000)]): 'baz'})
+
+
+    def test_big_row_key(self):
+        ## Greater than 1024
+        self.table.put(''.join(['a' for _ in range(10000)]), {'f:bar': 'baz'})
+        row = self.table.row(''.join(['a' for _ in range(10000)]))
+        self.assertEquals(row, {'f:bar': 'baz'})
+
+    def test_big_column_family(self):
+        self.connection.delete_table(TABLE_NAME)
+        self.connection.create_table(TABLE_NAME, {''.join(['a' for _ in range(1000)]): {}})
+        self.table.put('foo', {''.join(['a' for _ in range(1000)]) + ':bar': 'baz'})
+        row = self.table.row('foo')
+        self.assertEquals(row, {''.join(['a' for _ in range(1000)]) + ':bar': 'baz'})
+
+
 
 class TestCTablePutNull(unittest.TestCase):
     def setUp(self):
@@ -281,70 +347,6 @@ class TestCTablePutNull(unittest.TestCase):
         self.assertRaises(TypeError, self.table.put, "bar\x00", {"f:foo": "bar"})
 
 
-    def test_empty_put(self):
-        self.assertRaises(ValueError, self.table.put, 'foo', {})
-
-    def test_bad_column_family_no_colon(self):
-        #All keys in the put dict must contain a colon separating the family from the qualifier
-        self.assertRaises(ValueError, self.table.put, 'foo', {'bar': 'baz'})
-
-    def test_bad_colon_no_family(self):
-        self.assertRaises(ValueError, self.table.put, 'foo', {":bar": "baz", 'invalid:foo': 'bar'})
-        row = self.table.row('foo')
-        self.assertEquals(row, {})
-
-    def test_bad_colon_no_qualifier(self):
-        # LOL Apparently this is totaly fine
-        self.table.put('foo', {"f:": "baz"})
-        row = self.table.row('foo')
-        self.assertEquals(row, {"f:": "baz"})
-
-    def test_invalid_column_family(self):
-        self.assertRaises(ValueError, self.table.put, 'foo', {"f:bar": "baz", 'invalid:foo': 'bar'})
-        row = self.table.row('foo')
-        self.assertEquals(row, {})
-
-    def test_set(self):
-        self.assertRaises(TypeError, self.table.put, 'foo', {"f:bar", "baz"})
-        row = self.table.row('foo')
-        self.assertEquals(row, {})
-
-    def test_empty_value(self):
-        self.table.put("foo", {"f:bar": ""})
-        row = self.table.row('foo')
-        self.assertEquals(row, {'f:bar': ""})
-
-    def test_unicode(self):
-        self.table.put(u"foo", {u"f:bar": u"baz"})
-        row = self.table.row('foo')
-        self.assertEquals(row, {'f:bar': "baz"})
-
-    def test_big_value(self):
-        ## Greater than 1024
-        #raise NotImplementedError
-        self.table.put('foo', {'f:bar': ''.join(['a' for _ in range(10000)])})
-        row = self.table.row('foo')
-        self.assertEquals(row, {'f:bar': ''.join(['a' for _ in range(10000)])})
-
-    def test_big_qualifier(self):
-        ## Greater than 1024
-        self.table.put('foo', {'f:' + ''.join(['a' for _ in range(10000)]): 'baz'})
-        row = self.table.row('foo')
-        self.assertEquals(row, {'f:' + ''.join(['a' for _ in range(10000)]): 'baz'})
-
-
-    def test_big_row_key(self):
-        ## Greater than 1024
-        self.table.put(''.join(['a' for _ in range(10000)]), {'f:bar': 'baz'})
-        row = self.table.row(''.join(['a' for _ in range(10000)]))
-        self.assertEquals(row, {'f:bar': 'baz'})
-
-    def test_big_column_family(self):
-        self.connection.delete_table(TABLE_NAME)
-        self.connection.create_table(TABLE_NAME, {''.join(['a' for _ in range(1000)]): {}})
-        self.table.put('foo', {''.join(['a' for _ in range(1000)]) + ':bar': 'baz'})
-        row = self.table.row('foo')
-        self.assertEquals(row, {''.join(['a' for _ in range(1000)]) + ':bar': 'baz'})
 
 
 class TestCTablePutSplit(unittest.TestCase):
