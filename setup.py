@@ -41,7 +41,7 @@ module1 = Extension('pychbase._pychbase',
                     library_dirs=['/opt/mapr/lib','/usr/lib/jvm/jre-1.7.0/lib/amd64/server/'])
 
 setup(name='pychbase',
-      version='0.1.4',
+      version='0.1.5',
       description=long_description,
       long_description=read_md('README.md'),
       url='https://github.com/mkmoisen/pychbase',
