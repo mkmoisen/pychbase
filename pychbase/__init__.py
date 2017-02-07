@@ -58,13 +58,13 @@ class Table(object):
         self.table_name = table_name
         self._table = _table(connection._connection, table_name)
 
-    def row(self, row, *args, **kwargs):
+    def row(self, row, columns=None, timestamp=None, include_timestamp=False):
         return self._table.row(row)
 
-    def put(self, row, data, *args, **kwargs):
-        return self._table.put(row, data)
+    def put(self, row, data, timestamp=None, wal=True):
+        return self._table.put(row, data, timestamp, wal)
 
-    def delete(self, row, *args, **kwargs):
+    def delete(self, row, columns=None, timestamp=None, wal=True):
         return self._table.delete(row)
 
     def scan(self, start='', stop='', *args, **kwargs):

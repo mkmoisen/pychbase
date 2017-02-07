@@ -277,6 +277,28 @@ class TestCTablePut(unittest.TestCase):
         row = self.table.row('foo')
         self.assertEquals(row, {''.join(['a' for _ in range(1000)]) + ':bar': 'baz'})
 
+class TestCTableTimestamp(unittest.TestCase):
+    def setUp(self):
+        self.connection = _connection(ZOOKEEPERS)
+        self.connection.create_table(TABLE_NAME, {'f': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+
+    def tearDown(self):
+        self.connection.delete_table(TABLE_NAME)
+        self.connection.close()
+
+    def test_happy(self):
+        self.table.put('foo', {'f:foo': 'bar'}, 10)
+        row = self.table.row('foo', None, None, True)
+        self.assertEquals(row, {'f:foo': ('bar', 10)})
+
+    def test_row_version_too_low(self):
+        self.table.put('foo', {'f:foo': 'bar'}, 10)
+        row = self.table.row('foo', None, 5)
+        self.assertEquals(row, {})
+
+
+
 
 
 class TestCTablePutNull(unittest.TestCase):

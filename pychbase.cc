@@ -799,6 +799,7 @@ struct CallBackBuffer {
     uint64_t count;
     pthread_mutex_t mutex;
     BatchCallBackBuffer *batch_call_back_buffer;
+    bool include_timestamp;
     //PyObject *rets;
     // TODO I don't require the Table *t anymore right?
     CallBackBuffer(RowBuffer *r, BatchCallBackBuffer *bcbb) {
@@ -808,6 +809,7 @@ struct CallBackBuffer {
         batch_call_back_buffer = bcbb;
         mutex = PTHREAD_MUTEX_INITIALIZER;
         ret = NULL;
+        include_timestamp = false;
     }
     ~CallBackBuffer() {
         /*
@@ -912,7 +914,7 @@ static PyMemberDef Table_members[] = {
 };
 
 
-static int read_result(hb_result_t result, PyObject *dict) {
+static int read_result(hb_result_t result, PyObject *dict, bool include_timestamp) {
     int err = 0;
 
     OOM_OBJ_RETURN_ERRNO(result);
@@ -950,14 +952,21 @@ static int read_result(hb_result_t result, PyObject *dict) {
             return 12; //ENOMEM Cannot allocate memory
         }
 
-        PyObject *key = Py_BuildValue("s", fq);
+
+         PyObject *key = Py_BuildValue("s", fq);
+
         free(fq);
         if (!key) {
             free(value_char);
             return 12; //ENOMEM Cannot allocate memory
         }
-
-        PyObject *value = Py_BuildValue("s", value_char);
+        uint64_t timestamp = cell->ts;
+        PyObject *value = NULL;
+        if (!include_timestamp) {
+            value = Py_BuildValue("s", value_char);
+        } else {
+            value = Py_BuildValue("si", value_char, timestamp);
+        }
         free(value_char);
         if (!value) {
             Py_DECREF(key);
@@ -1047,7 +1056,7 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
         return;
     }
 
-    err = read_result(result, dict);
+    err = read_result(result, dict, call_back_buffer->include_timestamp);
 
     if (err != 0) {
         pthread_mutex_lock(&call_back_buffer->mutex);
@@ -1099,13 +1108,34 @@ while True:
 
 static PyObject *Table_row(Table *self, PyObject *args) {
     char *row_key;
+    PyObject *columns;
+    PyObject *timestamp = NULL;
+    uint64_t timestamp_int = NULL;
+    PyObject *include_timestamp = NULL;
+    bool include_timestamp_bool = false;
 
-    if (!PyArg_ParseTuple(args, "s", &row_key)) {
+    // Todo type check
+    if (!PyArg_ParseTuple(args, "s|OiO", &row_key, &columns, &timestamp, &include_timestamp)) {
         return NULL;
     }
 
     if (!self->connection->is_open) {
         Connection_open(self->connection);
+    }
+
+    if (timestamp) {
+        // seg faulting
+        if (!PyInt_Check(timestamp)) {
+            PyErr_SetString(PyExc_TypeError, "Timestamp must be int\n");
+            return NULL;
+        }
+        timestamp_int = (uint64_t) PyInt_AsSsize_t(timestamp);
+    }
+
+    if (include_timestamp) {
+        if (PyObject_IsTrue(include_timestamp)) {
+            include_timestamp_bool = true;
+        }
     }
 
     int err = 0;
@@ -1137,6 +1167,8 @@ static PyObject *Table_row(Table *self, PyObject *args) {
         delete row_buff;
         return PyErr_NoMemory();
     }
+
+    call_back_buffer->include_timestamp = include_timestamp_bool;
 
     // If err is nonzero, the callback is guarenteed to not have been invoked
     err = hb_get_send(self->connection->client, get, row_callback, call_back_buffer);
@@ -1328,7 +1360,7 @@ static int create_dummy_cell(hb_cell_t **cell,
     cell_ptr->value_len = vLen;
 
     // TODO submit a fix to the samples for this
-    cell_ptr->ts = HBASE_LATEST_TIMESTAMP;
+    //cell_ptr->ts = HBASE_LATEST_TIMESTAMP;
 
     *cell = cell_ptr;
 
@@ -1379,7 +1411,7 @@ lol()
 * Returns -1 if any key in dict is an empty string
 * Returns an unknown error code if hb_put_add_cell fails - presumably a libhbase/hbase failure after all my checks
 */
-static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObject *dict, hb_put_t *hb_put, bool is_bufferable) {
+static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObject *dict, hb_put_t *hb_put, bool is_bufferable, uint64_t timestamp, bool is_wal) {
     int err;
 
     OOM_OBJ_RETURN_ERRNO(self);
@@ -1464,6 +1496,12 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
             return err;
         }
 
+        if (timestamp) {
+            cell->ts = timestamp;
+        } else {
+            cell->ts = HBASE_LATEST_TIMESTAMP;
+        }
+
         err = hb_put_add_cell(*hb_put, cell);;
         if (err != 0) {
             delete cell;
@@ -1483,15 +1521,30 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
         return err;
     }
 
+    if (is_wal) {
+        hb_mutation_set_durability((hb_mutation_t) *hb_put, DURABILITY_SYNC_WAL);
+    } else {
+        hb_mutation_set_durability((hb_mutation_t) *hb_put, DURABILITY_SKIP_WAL);
+    }
+
     return err;
 }
 
 static PyObject *Table_put(Table *self, PyObject *args) {
     char *row_key;
     PyObject *dict;
+    uint64_t timestamp = NULL;
+    PyObject *is_wal = NULL;
+    bool is_wal_bool = true;
 
-    if (!PyArg_ParseTuple(args, "sO!", &row_key, &PyDict_Type, &dict)) {
+    if (!PyArg_ParseTuple(args, "sO!|iO", &row_key, &PyDict_Type, &dict, &timestamp, &is_wal)) {
         return NULL;
+    }
+
+    if (is_wal) {
+        if (!PyObject_IsTrue(is_wal)) {
+            is_wal_bool = false;
+        }
     }
 
     int err = 0;
@@ -1507,7 +1560,8 @@ static PyObject *Table_put(Table *self, PyObject *args) {
 
     hb_put_t hb_put = NULL; // This must be initialized to NULL or else hb_mutation_destroy could fail
 
-    err = make_put(self, row_buf, row_key, dict, &hb_put, false);
+    // TODO add timestamp
+    err = make_put(self, row_buf, row_key, dict, &hb_put, false, timestamp, is_wal_bool);
     if (err != 0) {
         delete row_buf;
         delete call_back_buffer;
@@ -1694,7 +1748,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
 
             // I cannot imagine this lock being necessary
             //pthread_mutex_lock(&call_back_buffer->mutex);
-            err = read_result(results[r], dict);
+            err = read_result(results[r], dict, call_back_buffer->include_timestamp);
             //pthread_mutex_unlock(&call_back_buffer->mutex);
             if (err != 0) {
                 pthread_mutex_lock(&call_back_buffer->mutex);
@@ -2004,7 +2058,8 @@ table.delete('hello1')
 * Returns -5 if row_key is empty string
 * Returns an unknown error if hb_delete_create fails or hb_mutation_set_table
 */
-static int make_delete(Table *self, char *row_key, hb_delete_t *hb_delete) {
+// TODO I should let the durability include DURABILITY_USE_DEFAULT, DURABILITY_ASYNC_WAL, DURABILITY_SYNC_WAL
+static int make_delete(Table *self, char *row_key, hb_delete_t *hb_delete, uint64_t timestamp, bool is_wal) {
     int err = 0;
 
     OOM_OBJ_RETURN_ERRNO(self);
@@ -2027,24 +2082,46 @@ static int make_delete(Table *self, char *row_key, hb_delete_t *hb_delete) {
         return err;
     }
 
+    if (timestamp) {
+        hb_delete_set_timestamp((hb_mutation_t) *hb_delete, timestamp);
+    }
+
+    if (is_wal) {
+        hb_mutation_set_durability((hb_mutation_t) *hb_delete, DURABILITY_SYNC_WAL);
+    } else {
+        hb_mutation_set_durability((hb_mutation_t) *hb_delete, DURABILITY_SKIP_WAL);
+    }
+
+
+
     return err;
 }
 
 static PyObject *Table_delete(Table *self, PyObject *args) {
     char *row_key;
+    uint64_t timestamp = NULL;
+    PyObject *is_wal = NULL;
+    bool is_wal_bool = true;
 
-    if (!PyArg_ParseTuple(args, "s", &row_key)) {
+    if (!PyArg_ParseTuple(args, "s|iO", &row_key, &timestamp, &is_wal)) {
         return NULL;
     }
     if (!self->connection->is_open) {
         Connection_open(self->connection);
     }
 
+    if (is_wal) {
+        if (!PyObject_IsTrue(is_wal)) {
+            is_wal_bool = false;
+        }
+    }
+
     int err = 0;
 
     // TODO Do I need to check to see if hb_delete is null inside of the make_delete function?
     hb_delete_t hb_delete = NULL;
-    err = make_delete(self, row_key, &hb_delete);
+    // todo add timestamp
+    err = make_delete(self, row_key, &hb_delete, timestamp, is_wal_bool);
     OOM_ERRNO_RETURN_NULL(err);
     if (err != 0) {
         hb_mutation_destroy((hb_mutation_t) hb_delete);
@@ -2345,7 +2422,8 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
             }
 
             hb_put_t hb_put = NULL;
-            err = make_put(self, rowBuf, row_key_char, dict, &hb_put, is_bufferable_bool);
+            // todo add timestamp
+            err = make_put(self, rowBuf, row_key_char, dict, &hb_put, is_bufferable_bool, NULL, true);
             if (err != 0) {
                 pthread_mutex_lock(&batch_call_back_buffer->mutex);
                 batch_call_back_buffer->errors++;
@@ -2386,7 +2464,8 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
         } else if (strcmp(mutation_type_char, "delete") == 0) {
             hb_delete_t hb_delete = NULL;
-            err = make_delete(self, row_key_char, &hb_delete);
+            // todo add timestamp
+            err = make_delete(self, row_key_char, &hb_delete, NULL, true);
             if (err != 0) {
                 pthread_mutex_lock(&batch_call_back_buffer->mutex);
                 batch_call_back_buffer->errors++;
