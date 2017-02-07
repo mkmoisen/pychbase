@@ -364,23 +364,23 @@ class TestCTablePutSplit(unittest.TestCase):
     def test_first(self):
         self.connection.create_table(TABLE_NAME, {'f': {}})
         self.table = _table(self.connection, TABLE_NAME)
-        self.table.put("a", {"f:{cq}".format(cq='f' * i): str(i) for i in range(1000)})
+        self.table.put("a", {"f:{cq}".format(cq='f' * i): str(i) for i in range(1, 1000)})
         row = self.table.row("a")
-        self.assertEquals(row, {"f:{cq}".format(cq='f' * i): str(i) for i in range(1000)})
+        self.assertEquals(row, {"f:{cq}".format(cq='f' * i): str(i) for i in range(1, 1000)})
 
     def test_second(self):
         self.connection.create_table(TABLE_NAME, {'ff': {}})
         self.table = _table(self.connection, TABLE_NAME)
-        self.table.put("a", {"ff:{cq}".format(cq='f' * i): str(i) for i in range(1000)})
+        self.table.put("a", {"ff:{cq}".format(cq='f' * i): str(i) for i in range(1, 1000)})
         row = self.table.row("a")
-        self.assertEquals(row, {"ff:{cq}".format(cq='f' * i): str(i) for i in range(1000)})
+        self.assertEquals(row, {"ff:{cq}".format(cq='f' * i): str(i) for i in range(1, 1000)})
 
     def test_third(self):
         self.connection.create_table(TABLE_NAME, {'fff': {}})
         self.table = _table(self.connection, TABLE_NAME)
-        self.table.put("a", {"fff:{cq}".format(cq='f' * i): str(i) for i in range(1000)})
+        self.table.put("a", {"fff:{cq}".format(cq='f' * i): str(i) for i in range(1, 1000)})
         row = self.table.row("a")
-        self.assertEquals(row, {"fff:{cq}".format(cq='f' * i): str(i) for i in range(1000)})
+        self.assertEquals(row, {"fff:{cq}".format(cq='f' * i): str(i) for i in range(1, 1000)})
 
 
 # START HERE
@@ -520,7 +520,7 @@ class TestCTableBatch(unittest.TestCase):
         actions = [
             ('put', 'a', {'f:foo': 'bar'}),
             ('put', 'b', {'f': 'bar'}),
-            ('put', 'c', {'f:': 'bar'}), # This is legal
+            ('put', 'c', {'f:': 'bar'}), # This is legal - not have the new put
             ('put', 'd', {':foo': 'bar'}),
             ('put', 'e', {'invalid:foo': 'bar'}),
             ('put', 'f', 'invalid data type'),

@@ -1305,7 +1305,7 @@ void put_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result
 * Returns 0 on success
 * Returns 12 on OOM
 */
-/*
+
 static int create_dummy_cell(hb_cell_t **cell,
                       const char *r, size_t rLen,
                       const char *f, size_t fLen,
@@ -1327,12 +1327,15 @@ static int create_dummy_cell(hb_cell_t **cell,
     cell_ptr->value = (byte_t *)v;
     cell_ptr->value_len = vLen;
 
+    // TODO submit a fix to the samples for this
+    cell_ptr->ts = HBASE_LATEST_TIMESTAMP;
+
     *cell = cell_ptr;
 
     return 0;
 }
-*/
 
+/*
 static int add_column_to_put(hb_put_t *hb_put,
                       const char *family, size_t family_len,
                       const char *qualifier, size_t qualifier_len,
@@ -1344,6 +1347,7 @@ static int add_column_to_put(hb_put_t *hb_put,
 
     return err;
 }
+*/
 
 
 /*
@@ -1366,7 +1370,10 @@ lol()
 * Creates an HBase Put object given a row key and dictionary of fully qualified columns to values
 * Returns 0 on success
 * Returns 12 on OOM
+* Returns -5 if put was empty
 * Returns -10 if no colon was found
+* Returns -4 if value is empty string
+* Returns -6 if qualifier is empty string
 * Returns -7 if any key in dict is not a string
 * Returns -8 if any value in dict is not a string
 * Returns -1 if any key in dict is an empty string
@@ -1393,7 +1400,7 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
 
     PyObject *fq, *value;
     Py_ssize_t pos = 0;
-    //hb_cell_t *cell;
+    hb_cell_t *cell;
 
     // https://docs.python.org/2/c-api/dict.html?highlight=pydict_next#c.PyDict_Next
     // This says PyDict_Next borrows references for key and value...
@@ -1425,8 +1432,20 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
             return err;
         }
 
+
+
         char *value_char = PyString_AsString(value);
         OOM_OBJ_RETURN_ERRNO(value_char);
+
+        /*
+        if (strlen(qualifier) == 0) {
+            return -6;
+        }
+        if (strlen(value_char) == 0) {
+            return -4;
+        }
+        */
+
         // I suppose an empty string here is OK
 
         //char *v = row_buf->getBuffer(strlen(value_char));
@@ -1439,19 +1458,19 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
         //strcpy(v, value_char);
 
         //err = create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family), qualifier, strlen(qualifier), v, strlen(v));
-        //err = create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family), qualifier, strlen(qualifier), value_char, strlen(value_char));
-        err = add_column_to_put(hb_put, family, strlen(family), qualifier, strlen(qualifier), value_char, strlen(value_char));
+        err = create_dummy_cell(&cell, row_key, strlen(row_key), family, strlen(family), qualifier, strlen(qualifier), value_char, strlen(value_char));
+        //err = add_column_to_put(hb_put, family, strlen(family), qualifier, strlen(qualifier), value_char, strlen(value_char));
         if (err != 0) {
             return err;
         }
 
-        //err = hb_put_add_cell(*hb_put, cell);;
-        //if (err != 0) {
-        //    delete cell;
-        //    return err;
-        //}
+        err = hb_put_add_cell(*hb_put, cell);;
+        if (err != 0) {
+            delete cell;
+            return err;
+        }
 
-        //delete cell;
+        delete cell;
     }
 
     err = hb_mutation_set_table((hb_mutation_t)*hb_put, self->table_name, strlen(self->table_name));
@@ -1498,6 +1517,12 @@ static PyObject *Table_put(Table *self, PyObject *args) {
         // I could then validate it in a batched put before sending it to hbase
         if (err == -10) {
             PyErr_SetString(PyExc_ValueError, "All keys must contain a colon delimiting the family and qualifier");
+
+        } else if (err == -6) {
+            PyErr_SetString(PyExc_ValueError, "Qualifier must not be empty string");
+
+        } else if (err == -4) {
+            PyErr_SetString(PyExc_ValueError, "Value must not be empty string");
 
         } else if (err == -7) {
             PyErr_SetString(PyExc_TypeError, "All keys must contain a colon delimited string");
