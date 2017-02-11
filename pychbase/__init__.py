@@ -153,19 +153,17 @@ class Table(object):
         raise NotImplementedError
 
 
-
-
 class Batch(object):
     def __init__(self, table, timestamp=None, batch_size=None, *args, **kwargs):
         self.table = table
         self._actions = []
         self._batch_size = batch_size
 
-    def put(self, row, data, *args, **kwargs):
+    def put(self, row, data, wal=None):
         self._actions.append(('put', row, data))
         self._check_send()
 
-    def delete(self, row, *args, **kwargs):
+    def delete(self, row, columns=None, wal=None):
         self._actions.append(('delete', row))
         self._check_send()
 
@@ -177,4 +175,11 @@ class Batch(object):
         errors, results = self.table._table.batch(self._actions)
         self._actions = []
         return errors
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # TODO transaction
+        self.send()
 
