@@ -2,7 +2,9 @@ from pychbase._pychbase import _connection, _table, HBaseError
 
 # TODO It would be cool to see if ld_library_path is set correctly?
 
+
 class Connection(object):
+    # TODO HappyBase API for __init__
     def __init__(self, zookeepers=None):
         if zookeepers is None:
             zookeepers = self._extract_zookeepers()
@@ -27,19 +29,15 @@ class Connection(object):
         statements = first_line.split()
         return ','.join(zookeeper for zookeeper in statements if ':' in zookeeper)
 
-    def table(self, table_name, *args, **kwargs):
+    def table(self, table_name, use_prefix):
+        # Todo use_prefix is not used
         return Table(self, table_name)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
 
     def create_table(self, name, families):
         self._connection.create_table(name, families)
 
-    def delete_table(self, table_name, *args, **kwargs):
+    def delete_table(self, table_name, disable=False):
+        # TODO I'm deleting it even if it's not disabled
         self._connection.delete_table(table_name)
 
     def open(self):
@@ -51,6 +49,23 @@ class Connection(object):
     def __del__(self):
         self.close()
 
+    def tables(self):
+        raise NotImplementedError
+
+    def enable_table(self):
+        raise NotImplementedError
+
+    def disable_table(self):
+        raise NotImplementedError
+
+    def is_table_enabled(self, name):
+        raise NotImplementedError
+
+    def compact_table(self, name, major=False):
+        raise NotImplementedError
+
+
+
 
 class Table(object):
     def __init__(self, connection, table_name):
@@ -59,15 +74,29 @@ class Table(object):
         self._table = _table(connection._connection, table_name)
 
     def row(self, row, columns=None, timestamp=None, include_timestamp=False):
+        # TODO columns
         return self._table.row(row, columns, timestamp, include_timestamp)
 
+    def rows(self, rows, columns=None, timestamp=None, include_timestamp=False):
+        # TODO add test
+        return [self.row(row, columns, timestamp, include_timestamp) for row in rows]
+
     def put(self, row, data, timestamp=None, wal=True):
+        # TODO columns
         return self._table.put(row, data, timestamp, wal)
 
     def delete(self, row, columns=None, timestamp=None, wal=True):
+        # TODO columns
         return self._table.delete(row, columns, timestamp, wal)
 
-    def scan(self, start=None, stop=None, row_prefix=None, *args, **kwargs):
+    def scan(self, start=None, stop=None, row_prefix=None, columns=None, filter=None, timstamp=None,
+             include_timestamp=None, batch_size=1000, scan_batching=None, limit=None, sorted_columns=False,
+             reverse=False):
+        # TODO columns
+        # TODO filter
+        # TODO timestamp
+        # TODO include_timestamp
+        # TODO Think about how to do batch_size/scan_batching
         if row_prefix is None:
             if start is None:
                 start = ''
@@ -82,6 +111,7 @@ class Table(object):
             yield k, v
 
     def delete_prefix(self, rowkey_prefix, *args, **kwargs):
+        # TODO would this be faster if I moved it to C?
         delete_count = 0
         batch = self.batch()
         for row_key, obj in self.scan(rowkey_prefix, rowkey_prefix + '~'):
@@ -96,8 +126,33 @@ class Table(object):
     def close(self):
         self.connection.close()
 
-    def batch(self, timestamp=None, batch_size=None, *args, **kwargs):
+    def batch(self, timestamp=None, batch_size=None, transaction=False, wal=True):
         return Batch(self, timestamp, batch_size)
+
+    def families(self):
+        # I see no way to do this with libhbase
+        raise NotImplementedError
+
+    def regions(self):
+        # I see no way to do this with libhbase
+        raise NotImplementedError
+
+    def cells(self, row, column, versions=None, timestamp=None, include_timestamp=False):
+        raise NotImplementedError
+
+    def counter_get(self, row, column):
+        raise NotImplementedError
+
+    def counter_set(self, row, column, value=0):
+        raise NotImplementedError
+
+    def counter_inc(self, row, column, value=1):
+        raise NotImplementedError
+
+    def counter_dec(self, row, column, value=1):
+        raise NotImplementedError
+
+
 
 
 class Batch(object):
