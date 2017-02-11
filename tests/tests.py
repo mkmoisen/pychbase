@@ -908,7 +908,29 @@ class TestCTableBatch(unittest.TestCase):
 
 
 
+class TestPython(unittest.TestCase):
+    def setUp(self):
+        # TODO Configure this for non-mapr users
+        self.connection = Connection()
+        try:
+            self.connection.create_table(TABLE_NAME, {'f': {}})
+        except ValueError:
+            pass
+        self.table = self.connection.table(TABLE_NAME)
 
+    def tearDown(self):
+        try:
+            self.connection.delete_table(TABLE_NAME)
+        except ValueError:
+            pass
+        self.connection.close()
+
+    def test_rows(self):
+        for i in range(5):
+            self.table.put("foo%i" % i, {'f:foo': 'bar%i' % i})
+
+        rows = self.table.rows(['foo%i' % i for i in range(1, 4)])
+        self.assertEquals(rows, [{'f:foo': 'bar%i' % i} for i in range(1, 4)])
 
 class TestPythonHappy(unittest.TestCase):
     def setUp(self):
