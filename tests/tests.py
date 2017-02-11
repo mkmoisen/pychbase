@@ -292,10 +292,51 @@ class TestCTableTimestamp(unittest.TestCase):
         row = self.table.row('foo', None, None, True)
         self.assertEquals(row, {'f:foo': ('bar', 10)})
 
+    def test_happy_version(self):
+        self.table.put('foo', {'f:foo': 'bar'}, 10)
+        row = self.table.row('foo', None, 10, True)
+        self.assertEquals(row, {'f:foo': ('bar', 10)})
+
+        row = self.table.row('foo', None, 11, True)
+        self.assertEquals(row, {'f:foo': ('bar', 10)})
+
+        row = self.table.row('foo', None, 9, True)
+        self.assertEquals(row, {})
+
+    def test_happy_update(self):
+        self.table.put('foo', {'f:foo': 'bar'}, 5)
+        self.table.put('foo', {'f:foo': 'bar'}, 10)
+        row = self.table.row('foo', None, None, True)
+        self.assertEquals(row, {'f:foo': ('bar', 10)})
+
+        row = self.table.row('foo', None, 5, True)
+        self.assertEquals(row, {'f:foo': ('bar', 5)})
+
     def test_row_version_too_low(self):
         self.table.put('foo', {'f:foo': 'bar'}, 10)
         row = self.table.row('foo', None, 5)
         self.assertEquals(row, {})
+
+    def test_happy_delete(self):
+        self.table.put('foo', {'f:foo': 'bar'}, 10)
+        self.table.delete('foo', None, 10)
+        row = self.table.row('foo')
+        self.assertEquals(row, {})
+
+    def test_happy_delete_update_1(self):
+        self.table.put('foo', {'f:foo': 'bar'}, 5)
+        self.table.put('foo', {'f:foo': 'bar'}, 10)
+        self.table.delete('foo', None, 10)
+        row = self.table.row('foo', None, None, True)
+        self.assertEquals(row, {'f:foo': ('bar', 5)})
+
+    def test_happy_delete_update_2(self):
+        self.table.put('foo', {'f:foo': 'bar'}, 5)
+        self.table.put('foo', {'f:foo': 'bar'}, 10)
+        self.table.delete('foo', None, 5)
+        row = self.table.row('foo', None, None, True)
+        self.assertEquals(row, {'f:foo': ('bar', 10)})
+
 
 
 

@@ -1115,7 +1115,7 @@ static PyObject *Table_row(Table *self, PyObject *args) {
     bool include_timestamp_bool = false;
 
     // Todo type check
-    if (!PyArg_ParseTuple(args, "s|OiO", &row_key, &columns, &timestamp, &include_timestamp)) {
+    if (!PyArg_ParseTuple(args, "s|OOO", &row_key, &columns, &timestamp, &include_timestamp)) {
         return NULL;
     }
 
@@ -1124,12 +1124,16 @@ static PyObject *Table_row(Table *self, PyObject *args) {
     }
 
     if (timestamp) {
-        // seg faulting
-        if (!PyInt_Check(timestamp)) {
-            PyErr_SetString(PyExc_TypeError, "Timestamp must be int\n");
-            return NULL;
+        if (timestamp != Py_None) {
+            // seg faulting
+            if (!PyInt_Check(timestamp)) {
+                PyErr_SetString(PyExc_TypeError, "Timestamp must be int\n");
+                return NULL;
+            }
+            timestamp_int = (uint64_t) PyInt_AsSsize_t(timestamp);
+        } else {
+            timestamp = NULL;
         }
-        timestamp_int = (uint64_t) PyInt_AsSsize_t(timestamp);
     }
 
     if (include_timestamp) {
@@ -1153,6 +1157,18 @@ static PyObject *Table_row(Table *self, PyObject *args) {
         PyErr_Format(PyExc_ValueError, "Could not set table name '%s' on get", self->table_name);
         hb_get_destroy(get);
         return NULL;
+    }
+
+    if (timestamp) {
+        printf("I am setting timestamp on get to %i\n", timestamp_int);
+        // happybase is inclusive, libhbasec is exclusive
+        // TODO submit patch for exclusive in documentation
+        err = hb_get_set_timerange(get, NULL, timestamp_int + 1);
+        if (err != 0) {
+            PyErr_Format(PyExc_ValueError, "Could not set timestamp on get: %i", err);
+            hb_get_destroy(get);
+            return NULL;
+        }
     }
 
     RowBuffer *row_buff = new RowBuffer();
@@ -2099,11 +2115,13 @@ static int make_delete(Table *self, char *row_key, hb_delete_t *hb_delete, uint6
 
 static PyObject *Table_delete(Table *self, PyObject *args) {
     char *row_key;
-    uint64_t timestamp = NULL;
+    PyObject *timestamp = NULL;
+    PyObject *columns = NULL;
+    uint64_t timestamp_int = NULL;
     PyObject *is_wal = NULL;
     bool is_wal_bool = true;
 
-    if (!PyArg_ParseTuple(args, "s|iO", &row_key, &timestamp, &is_wal)) {
+    if (!PyArg_ParseTuple(args, "s|OOO", &row_key, &columns, &timestamp, &is_wal)) {
         return NULL;
     }
     if (!self->connection->is_open) {
@@ -2116,12 +2134,22 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
         }
     }
 
+    if (timestamp) {
+        if (timestamp != Py_None) {
+            if (!PyInt_Check(timestamp)) {
+                PyErr_SetString(PyExc_TypeError, "Timestamp must be int");
+                return NULL;
+            }
+            timestamp_int = PyInt_AsSsize_t(timestamp);
+        }
+    }
+
     int err = 0;
 
     // TODO Do I need to check to see if hb_delete is null inside of the make_delete function?
     hb_delete_t hb_delete = NULL;
     // todo add timestamp
-    err = make_delete(self, row_key, &hb_delete, timestamp, is_wal_bool);
+    err = make_delete(self, row_key, &hb_delete, timestamp_int, is_wal_bool);
     OOM_ERRNO_RETURN_NULL(err);
     if (err != 0) {
         hb_mutation_destroy((hb_mutation_t) hb_delete);
