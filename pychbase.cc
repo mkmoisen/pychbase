@@ -389,6 +389,75 @@ struct RowBuffer {
 };
 
 
+struct BatchCallBackBuffer;
+
+struct CallBackBuffer {
+    RowBuffer *rowBuf;
+    int err;
+    PyObject *ret;
+    uint64_t count;
+    pthread_mutex_t mutex;
+    BatchCallBackBuffer *batch_call_back_buffer;
+    bool include_timestamp;
+    //PyObject *rets;
+    // TODO I don't require the Table *t anymore right?
+    CallBackBuffer(RowBuffer *r, BatchCallBackBuffer *bcbb) {
+        rowBuf = r;
+        err = 0;
+        count = 0;
+        batch_call_back_buffer = bcbb;
+        mutex = PTHREAD_MUTEX_INITIALIZER;
+        ret = NULL;
+        include_timestamp = false;
+    }
+    ~CallBackBuffer() {
+        /*
+        * rowBuf is now being deleting inside the put/delete callbacks
+        * Note that the rowBuf must absolutely be deleted in all exit scenarios or else it will lead to a
+        * memory leak because I have removed the deletion from this destructor
+        */
+
+    }
+};
+
+/*
+import pychbase
+connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+connection.open()
+
+table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
+table.batch([], 10000)
+*/
+/*
+* BatchCallBackBuffer is used for Table_batch to maintain references to all CallBackBuffers
+*/
+struct BatchCallBackBuffer {
+    std::vector<CallBackBuffer *> call_back_buffers;
+    int number_of_mutations;
+    int count;
+    int errors;
+    pthread_mutex_t mutex;
+
+    BatchCallBackBuffer(int i) {
+        number_of_mutations = i;
+        call_back_buffers.reserve(i);
+        count = 0;
+        errors = 0;
+        // TODO compiler gives warnings about this check it out
+        mutex = PTHREAD_MUTEX_INITIALIZER;
+    }
+
+    ~BatchCallBackBuffer() {
+        while (call_back_buffers.size() > 0) {
+            CallBackBuffer *call_back_buffer = call_back_buffers.back();
+            call_back_buffers.pop_back();
+            delete call_back_buffer;
+            //free(call_back_buffers);
+        }
+    }
+
+};
+
 
 /*
 import pychbase
@@ -415,7 +484,13 @@ static void cl_dsc_cb(int32_t err, hb_client_t client, void *extra) {
 }
 
 void admin_disconnection_callback(int32_t err, hb_admin_t admin, void *extra){
-    //printf("*****************************************************************admin_dc_cb: err = %d\n", err);
+    CallBackBuffer *call_back_buffer = (CallBackBuffer *) extra;
+
+    pthread_mutex_lock(&call_back_buffer->mutex);
+    call_back_buffer->count = 1;
+    pthread_mutex_unlock(&call_back_buffer->mutex);
+
+
 }
 
 static PyObject *Connection_close(Connection *self) {
@@ -424,7 +499,19 @@ static PyObject *Connection_close(Connection *self) {
         // this used to cause a segfault, I'm not sure why it doesn't now
         // Lol i was getting an intermittent segfault, but apparently only after adding the timestamp/wal
         // now when I comment this out it apparently doesn't seg fault any more...
-        //hb_admin_destroy(self->admin, admin_disconnection_callback, NULL);
+
+        CallBackBuffer *call_back_buffer = new CallBackBuffer(NULL, NULL);
+        OOM_OBJ_RETURN_NULL(call_back_buffer);
+
+        hb_admin_destroy(self->admin, admin_disconnection_callback, call_back_buffer);
+
+        uint64_t local_count = 0;
+        while (local_count != 1) {
+            pthread_mutex_lock(&call_back_buffer->mutex);
+            local_count = call_back_buffer->count;
+            pthread_mutex_unlock(&call_back_buffer->mutex);
+            sleep(0.1);
+        }
 
         hb_client_destroy(self->client, cl_dsc_cb, NULL);
         hb_connection_destroy(self->conn);
@@ -792,74 +879,7 @@ This CallBackBuffer holds a reference to both the table and to the row buf
 The call back needs to free the row buf and increment the count when its done
 */
 
-struct BatchCallBackBuffer;
 
-struct CallBackBuffer {
-    RowBuffer *rowBuf;
-    int err;
-    PyObject *ret;
-    uint64_t count;
-    pthread_mutex_t mutex;
-    BatchCallBackBuffer *batch_call_back_buffer;
-    bool include_timestamp;
-    //PyObject *rets;
-    // TODO I don't require the Table *t anymore right?
-    CallBackBuffer(RowBuffer *r, BatchCallBackBuffer *bcbb) {
-        rowBuf = r;
-        err = 0;
-        count = 0;
-        batch_call_back_buffer = bcbb;
-        mutex = PTHREAD_MUTEX_INITIALIZER;
-        ret = NULL;
-        include_timestamp = false;
-    }
-    ~CallBackBuffer() {
-        /*
-        * rowBuf is now being deleting inside the put/delete callbacks
-        * Note that the rowBuf must absolutely be deleted in all exit scenarios or else it will lead to a
-        * memory leak because I have removed the deletion from this destructor
-        */
-
-    }
-};
-
-/*
-import pychbase
-connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
-connection.open()
-
-table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
-table.batch([], 10000)
-*/
-/*
-* BatchCallBackBuffer is used for Table_batch to maintain references to all CallBackBuffers
-*/
-struct BatchCallBackBuffer {
-    std::vector<CallBackBuffer *> call_back_buffers;
-    int number_of_mutations;
-    int count;
-    int errors;
-    pthread_mutex_t mutex;
-
-    BatchCallBackBuffer(int i) {
-        number_of_mutations = i;
-        call_back_buffers.reserve(i);
-        count = 0;
-        errors = 0;
-        // TODO compiler gives warnings about this check it out
-        mutex = PTHREAD_MUTEX_INITIALIZER;
-    }
-
-    ~BatchCallBackBuffer() {
-        while (call_back_buffers.size() > 0) {
-            CallBackBuffer *call_back_buffer = call_back_buffers.back();
-            call_back_buffers.pop_back();
-            delete call_back_buffer;
-            //free(call_back_buffers);
-        }
-    }
-
-};
 
 
 static void Table_dealloc(Table *self) {
