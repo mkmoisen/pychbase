@@ -166,7 +166,6 @@ class TestCTableInit(unittest.TestCase):
         self.connection.close()
 
 
-
 class TestCTableRow(unittest.TestCase):
     def setUp(self):
         self.connection = _connection(ZOOKEEPERS)
@@ -187,6 +186,17 @@ class TestCTableRow(unittest.TestCase):
 
     def test_read_only_table_name(self):
         self.assertRaises(TypeError, setattr, self.table, 'table_name', 'foo')
+
+    def test_timestamp_type(self):
+        row = self.table.row('foo', None, None)
+        row = self.table.row('foo', None, 1)
+        self.assertRaises(TypeError, self.table.row, 'foo', None, 'invalid')
+
+    def test_include_timestamp_type(self):
+        row = self.table.row('foo', None, None, None)
+        row = self.table.row('foo', None, None, True)
+        row = self.table.row('foo', None, None, False)
+        self.assertRaises(TypeError, self.table.row, 'foo', None, None, 'invalid')
 
 
 class TestCTablePut(unittest.TestCase):
@@ -277,6 +287,26 @@ class TestCTablePut(unittest.TestCase):
         row = self.table.row('foo')
         self.assertEquals(row, {''.join(['a' for _ in range(1000)]) + ':bar': 'baz'})
 
+    def test_type_timestamp(self):
+        self.table.put("foo", {'f:foo': 'bar'}, None)
+        self.assertEquals(self.table.row("foo"), {'f:foo': 'bar'})
+
+    def test_type_timestamp_1(self):
+        self.table.put("foo", {'f:foo': 'bar'}, 10)
+        self.assertEquals(self.table.row("foo"), {'f:foo': 'bar'})
+
+    def test_type_timestamp_2(self):
+        self.assertRaises(TypeError, self.table.put, 'foo', {'f:foo': 'bar'}, 'invalid')
+
+    def test_type_is_wall(self):
+        self.table.put("foo", {"f:foo": "bar"}, None, None)
+        self.table.put("foo", {"f:foo": "bar"}, None, True)
+        self.table.put("foo", {"f:foo": "bar"}, None, False)
+        self.assertRaises(TypeError, self.table.put, "foo",  {"f:foo": "bar"}, None, 'invalid')
+
+
+
+
 class TestCTableTimestamp(unittest.TestCase):
     def setUp(self):
         self.connection = _connection(ZOOKEEPERS)
@@ -324,22 +354,28 @@ class TestCTableTimestamp(unittest.TestCase):
         self.assertEquals(row, {})
 
     def test_happy_delete_update_1(self):
-        self.table.put('foo', {'f:foo': 'bar'}, 5)
+        self.table.put('foo', {'f:foo': 'foo'}, 5)
         self.table.put('foo', {'f:foo': 'bar'}, 10)
+        # This deletes everything up to the timestamp
         self.table.delete('foo', None, 10)
         row = self.table.row('foo', None, None, True)
-        self.assertEquals(row, {'f:foo': ('bar', 5)})
+        self.assertEquals(row, {})
 
     def test_happy_delete_update_2(self):
-        self.table.put('foo', {'f:foo': 'bar'}, 5)
+        self.table.put('foo', {'f:foo': 'foo'}, 5)
         self.table.put('foo', {'f:foo': 'bar'}, 10)
         self.table.delete('foo', None, 5)
         row = self.table.row('foo', None, None, True)
         self.assertEquals(row, {'f:foo': ('bar', 10)})
 
+    def test_happy_delete_update_3(self):
+        self.table.put('foo', {'f:foo': 'foo'}, 5)
+        self.table.put('foo', {'f:foo': 'bar'}, 10)
+        self.table.put('foo', {'f:foo': 'baz'}, 15)
+        self.table.delete('foo', None, 10)
 
-
-
+        row = self.table.row('foo', None, None, True)
+        self.assertEquals(row, {'f:foo': ('baz', 15)})
 
 
 class TestCTablePutNull(unittest.TestCase):
@@ -469,9 +505,37 @@ class TestCTableDelete(unittest.TestCase):
         for i in range(100):
             self.table.delete('foo')
 
-    def test_type(self):
+    def test_type_rowkey(self):
         self.assertRaises(TypeError, self.table.delete, 1)
-        self.assertRaises(TypeError, self.table.delete, {'foo':'bar'})
+        self.assertRaises(TypeError, self.table.delete, {'foo': 'bar'})
+
+    def test_type_timestamp(self):
+        self.table.put("foo", {"f:bar": "baz"}, 10)
+        self.table.delete("foo", None, None)
+        self.assertEquals(self.table.row("foo"), {})
+
+        self.table.put("foo", {"f:bar": "baz"}, 10)
+        self.table.delete("foo", None, 10)
+        self.assertEquals(self.table.row("foo"), {})
+
+        self.table.put("foo", {"f:bar": "baz"}, 10)
+        self.assertRaises(TypeError, self.table.delete, "foo", None, "invalid")
+
+    def test_type_is_wall(self):
+        self.table.put("foo", {"f:bar": "baz"})
+        self.table.delete("foo", None, None, None)
+        self.assertEquals(self.table.row("foo"), {})
+
+        self.table.put("foo", {"f:bar": "baz"})
+        self.table.delete("foo", None, None, True)
+        self.assertEquals(self.table.row("foo"), {})
+
+        self.table.put("foo", {"f:bar": "baz"})
+        self.table.delete("foo", None, None, False)
+        self.assertEquals(self.table.row("foo"), {})
+
+        self.assertRaises(TypeError, self.table.delete, 'foo', None, None, 'invalid')
+
 
     def test_empty_row_key(self):
         self.assertRaises(ValueError, self.table.delete, '')

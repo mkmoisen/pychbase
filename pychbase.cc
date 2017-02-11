@@ -422,7 +422,9 @@ static PyObject *Connection_close(Connection *self) {
     if (self->is_open) {
 
         // this used to cause a segfault, I'm not sure why it doesn't now
-        hb_admin_destroy(self->admin, admin_disconnection_callback, NULL);
+        // Lol i was getting an intermittent segfault, but apparently only after adding the timestamp/wal
+        // now when I comment this out it apparently doesn't seg fault any more...
+        //hb_admin_destroy(self->admin, admin_disconnection_callback, NULL);
 
         hb_client_destroy(self->client, cl_dsc_cb, NULL);
         hb_connection_destroy(self->conn);
@@ -1056,7 +1058,10 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
         return;
     }
 
+    // TODO Do I need a lock to access call_back_buffer->include_timestamp?
+    pthread_mutex_lock(&call_back_buffer->mutex);
     err = read_result(result, dict, call_back_buffer->include_timestamp);
+    pthread_mutex_unlock(&call_back_buffer->mutex);
 
     if (err != 0) {
         pthread_mutex_lock(&call_back_buffer->mutex);
@@ -1125,21 +1130,26 @@ static PyObject *Table_row(Table *self, PyObject *args) {
 
     if (timestamp) {
         if (timestamp != Py_None) {
-            // seg faulting
+            // was seg faulting i think before timestamp != Py_None check
             if (!PyInt_Check(timestamp)) {
                 PyErr_SetString(PyExc_TypeError, "Timestamp must be int\n");
                 return NULL;
             }
             timestamp_int = (uint64_t) PyInt_AsSsize_t(timestamp);
-        } else {
-            timestamp = NULL;
         }
     }
 
     if (include_timestamp) {
-        if (PyObject_IsTrue(include_timestamp)) {
-            include_timestamp_bool = true;
+        if (include_timestamp != Py_None) {
+            if (!PyObject_TypeCheck(include_timestamp, &PyBool_Type)) {
+                PyErr_SetString(PyExc_TypeError, "include_timestamp must be boolean\n");
+                return NULL;
+            }
+            if (PyObject_IsTrue(include_timestamp)) {
+                include_timestamp_bool = true;
+            }
         }
+
     }
 
     int err = 0;
@@ -1147,25 +1157,25 @@ static PyObject *Table_row(Table *self, PyObject *args) {
     hb_get_t get = NULL;
     err = hb_get_create((const byte_t *)row_key, strlen(row_key), &get);
     if (err != 0) {
-        PyErr_Format(HBaseError, "Could not create get with row key '%s'", row_key);
+        PyErr_Format(HBaseError, "Could not create get with row key '%s'\n", row_key);
         return NULL;
     }
     OOM_OBJ_RETURN_NULL(get);
 
     err = hb_get_set_table(get, self->table_name, strlen(self->table_name));
     if (err != 0) {
-        PyErr_Format(PyExc_ValueError, "Could not set table name '%s' on get", self->table_name);
+        PyErr_Format(PyExc_ValueError, "Could not set table name '%s' on get\n", self->table_name);
         hb_get_destroy(get);
         return NULL;
     }
 
-    if (timestamp) {
+    if (timestamp_int) {
         printf("I am setting timestamp on get to %i\n", timestamp_int);
         // happybase is inclusive, libhbasec is exclusive
         // TODO submit patch for exclusive in documentation
         err = hb_get_set_timerange(get, NULL, timestamp_int + 1);
         if (err != 0) {
-            PyErr_Format(PyExc_ValueError, "Could not set timestamp on get: %i", err);
+            PyErr_Format(PyExc_ValueError, "Could not set timestamp on get: %i\n", err);
             hb_get_destroy(get);
             return NULL;
         }
@@ -1549,19 +1559,40 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
 static PyObject *Table_put(Table *self, PyObject *args) {
     char *row_key;
     PyObject *dict;
-    uint64_t timestamp = NULL;
+    PyObject *timestamp = NULL;
+    uint64_t timestamp_int = NULL;
     PyObject *is_wal = NULL;
     bool is_wal_bool = true;
 
-    if (!PyArg_ParseTuple(args, "sO!|iO", &row_key, &PyDict_Type, &dict, &timestamp, &is_wal)) {
+    if (!PyArg_ParseTuple(args, "sO!|OO", &row_key, &PyDict_Type, &dict, &timestamp, &is_wal)) {
         return NULL;
     }
 
     if (is_wal) {
-        if (!PyObject_IsTrue(is_wal)) {
-            is_wal_bool = false;
+        if (is_wal != Py_None) {
+            if (!PyObject_TypeCheck(is_wal, &PyBool_Type)) {
+                PyErr_SetString(PyExc_TypeError, "is_wal must be boolean\n");
+                return NULL;
+            }
+            if (!PyObject_IsTrue(is_wal)) {
+                is_wal_bool = false;
+            }
         }
+
     }
+
+    if (timestamp) {
+        if (timestamp != Py_None) {
+            if (!PyInt_Check(timestamp)) {
+                PyErr_SetString(PyExc_TypeError, "Timestamp must be int\n");
+                return NULL;
+            }
+            timestamp_int = (uint64_t) PyInt_AsSsize_t(timestamp);
+        }
+
+    }
+
+
 
     int err = 0;
 
@@ -1577,7 +1608,7 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     hb_put_t hb_put = NULL; // This must be initialized to NULL or else hb_mutation_destroy could fail
 
     // TODO add timestamp
-    err = make_put(self, row_buf, row_key, dict, &hb_put, false, timestamp, is_wal_bool);
+    err = make_put(self, row_buf, row_key, dict, &hb_put, false, timestamp_int, is_wal_bool);
     if (err != 0) {
         delete row_buf;
         delete call_back_buffer;
@@ -2129,8 +2160,14 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
     }
 
     if (is_wal) {
-        if (!PyObject_IsTrue(is_wal)) {
-            is_wal_bool = false;
+        if (is_wal != Py_None) {
+            if (!PyObject_TypeCheck(is_wal, &PyBool_Type)) {
+                PyErr_SetString(PyExc_TypeError, "is_wal must be boolean\n");
+                return NULL;
+            }
+            if (!PyObject_IsTrue(is_wal)) {
+                is_wal_bool = false;
+            }
         }
     }
 
@@ -2143,6 +2180,8 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
             timestamp_int = PyInt_AsSsize_t(timestamp);
         }
     }
+
+    printf("timestamp_int is %i\n", timestamp_int);
 
     int err = 0;
 
