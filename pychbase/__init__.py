@@ -29,7 +29,7 @@ class Connection(object):
         statements = first_line.split()
         return ','.join(zookeeper for zookeeper in statements if ':' in zookeeper)
 
-    def table(self, table_name, use_prefix):
+    def table(self, table_name, use_prefix=True):
         # Todo use_prefix is not used
         return Table(self, table_name)
 
@@ -89,7 +89,7 @@ class Table(object):
         # TODO columns
         return self._table.delete(row, columns, timestamp, wal)
 
-    def scan(self, start=None, stop=None, row_prefix=None, columns=None, filter=None, timstamp=None,
+    def scan(self, start=None, stop=None, row_prefix=None, columns=None, filter=None, timestamp=None,
              include_timestamp=None, batch_size=1000, scan_batching=None, limit=None, sorted_columns=False,
              reverse=False):
         # TODO columns
@@ -107,7 +107,7 @@ class Table(object):
                 raise TypeError("Do not use start/stop in conjunction with row_prefix")
             start = row_prefix
             stop = row_prefix + '~'
-        for k, v in self._table.scan(start, stop):
+        for k, v in self._table.scan(start, stop, columns, filter, timestamp, include_timestamp):
             yield k, v
 
     def delete_prefix(self, rowkey_prefix, *args, **kwargs):
@@ -154,10 +154,13 @@ class Table(object):
 
 
 class Batch(object):
-    def __init__(self, table, timestamp=None, batch_size=None, *args, **kwargs):
+    def __init__(self, table, timestamp=None, batch_size=None, transaction=False, wal=True):
         self.table = table
         self._actions = []
         self._batch_size = batch_size
+        self._timestamp = timestamp
+        self._transaction = transaction
+        self._wal = wal
 
     def put(self, row, data, wal=None):
         self._actions.append(('put', row, data))

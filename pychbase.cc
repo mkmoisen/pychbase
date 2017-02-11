@@ -1092,7 +1092,7 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
         return;
     }
 
-    // TODO Do I need a lock to access call_back_buffer->include_timestamp?
+    // TODO Do I need a lock to access call_back_buffer->include_timestamp? I wouldn't think so..
     pthread_mutex_lock(&call_back_buffer->mutex);
     err = read_result(result, dict, call_back_buffer->include_timestamp);
     pthread_mutex_unlock(&call_back_buffer->mutex);
@@ -1957,9 +1957,37 @@ table.scan('hello', 'hello100~')
 static PyObject *Table_scan(Table *self, PyObject *args) {
     char *start = "";
     char *stop = "";
+    PyObject *columns = NULL;
+    PyObject *filter = NULL;
+    PyObject *timestamp = NULL;
+    uint64_t timestamp_int = NULL;
+    PyObject *include_timestamp = NULL;
+    bool include_timestamp_bool = false;
 
-    if (!PyArg_ParseTuple(args, "|ss", &start, &stop)) {
+    if (!PyArg_ParseTuple(args, "|ssOOOO", &start, &stop, &columns, &filter, &timestamp, &include_timestamp)) {
         return NULL;
+    }
+
+    if (timestamp) {
+        if (timestamp != Py_None) {
+            if (!PyInt_Check(timestamp)) {
+                PyErr_SetString(PyExc_TypeError, "Timestamp must be int\n");
+                return NULL;
+            }
+            timestamp_int = PyInt_AsSsize_t(timestamp);
+        }
+    }
+
+    if (include_timestamp) {
+        if (include_timestamp != Py_None) {
+            if (!PyObject_TypeCheck(include_timestamp, &PyBool_Type)) {
+                PyErr_SetString(PyExc_TypeError, "include_timestamp must be boolean\n");
+                return NULL;
+            }
+            if (PyObject_IsTrue(include_timestamp)) {
+                include_timestamp_bool = true;
+            }
+        }
     }
 
     int err = 0;
@@ -2019,9 +2047,19 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
         return NULL;
     }
 
+    if (timestamp_int) {
+        err = hb_scanner_set_timerange(scan, NULL, timestamp_int + 1);
+        if (err != 0) {
+            PyErr_Format(PyExc_ValueError, "Could not set timestamp on scan: %i\n", err);
+            hb_scanner_destroy(scan, NULL, NULL);
+            return NULL;
+        }
+    }
+
 
     RowBuffer *row_buf = new RowBuffer();
     if (!row_buf) {
+        // TODO do I need a call back here like on that segfault bug for admin_destroy
         hb_scanner_destroy(scan, NULL, NULL);
         return PyErr_NoMemory();
     }
@@ -2032,6 +2070,8 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
         hb_scanner_destroy(scan, NULL, NULL);
         return PyErr_NoMemory();
     }
+
+    call_back_buffer->include_timestamp = include_timestamp_bool;
 
     call_back_buffer->ret = PyList_New(0);
     if (!call_back_buffer->ret) {

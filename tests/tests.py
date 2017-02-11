@@ -383,6 +383,35 @@ class TestCTableTimestamp(unittest.TestCase):
         row = self.table.row('foo', None, None, True)
         self.assertEquals(row, {'f:foo': ('baz', 15)})
 
+    def test_scan_happy(self):
+        for i in range(0, 10):
+            self.table.put('foo%i' % i, {'f:foo': 'foo'}, 5)
+            self.table.put('foo%i' % i, {'f:foo': 'bar'}, 10)
+
+        for row, data in self.table.scan('', '', None, None, 5):
+            self.assertEquals(data, {'f:foo': 'foo'})
+
+        for row, data in self.table.scan('', '', None, None, 10):
+            self.assertEquals(data, {'f:foo': 'bar'})
+
+    def test_scan_to_low(self):
+        for i in range(0, 10):
+            self.table.put('foo%i' % i, {'f:foo': 'foo'}, 5)
+
+        i = 0
+        for row, data in self.table.scan('', '', None, None, 4):
+            i += 1
+
+        self.assertEquals(i, 0)
+
+
+
+
+
+
+
+
+
 
 class TestCTablePutNull(unittest.TestCase):
     def setUp(self):
@@ -547,7 +576,7 @@ class TestCTableDelete(unittest.TestCase):
         self.assertRaises(ValueError, self.table.delete, '')
 
 
-class TestCTableScanHappy(unittest.TestCase):
+class TestCTableScanStartStop(unittest.TestCase):
     def setUp(self):
         self.connection = _connection(ZOOKEEPERS)
         self.connection.create_table(TABLE_NAME, {'f': {}})
@@ -614,6 +643,52 @@ class TestCTableScanHappy(unittest.TestCase):
             i += 1
 
         self.assertEquals(i, 0)
+
+class TestCTableScan(unittest.TestCase):
+    def setUp(self):
+        self.connection = _connection(ZOOKEEPERS)
+        try:
+            self.connection.create_table(TABLE_NAME, {'f': {}})
+        except ValueError:
+            pass
+        self.table = _table(self.connection, TABLE_NAME)
+
+    def tearDown(self):
+        try:
+            self.connection.delete_table(TABLE_NAME)
+        except ValueError:
+            pass
+        self.connection.close()
+
+    def test_timestamp_type(self):
+        for i in range(0, 10):
+            self.table.put('foo%i' % i, {'f:foo': 'foo'}, 5)
+
+        for row, data in self.table.scan('', '', None, None, None):
+            self.assertEquals(data, {'f:foo': 'foo'})
+
+        for row, data in self.table.scan('', '', None, None, 5):
+            self.assertEquals(data, {'f:foo': 'foo'})
+
+        self.assertRaises(TypeError, self.table.scan, '', '', None, None, 'invalid')
+
+    def test_include_timestamp_type(self):
+        for i in range(0, 10):
+            self.table.put('foo%i' % i, {'f:foo': 'foo'}, 5)
+
+        for row, data in self.table.scan('', '', None, None, 5, None):
+            self.assertEquals(data, {'f:foo': 'foo'})
+
+        for row, data in self.table.scan('', '', None, None, 5, False):
+            self.assertEquals(data, {'f:foo': 'foo'})
+
+        for row, data in self.table.scan('', '', None, None, 5, True):
+            self.assertEquals(data, {'f:foo': ('foo', 5)})
+
+        self.assertRaises(TypeError, self.table.scan, '', '', None, None, 5, 'invalid')
+
+
+
 
 
 # TODO Need to add more columns to tests
