@@ -480,7 +480,11 @@ typedef struct {
 } Connection;
 
 static void cl_dsc_cb(int32_t err, hb_client_t client, void *extra) {
-    // Perhaps I could add a is_client_open boolean to connection ?
+    CallBackBuffer *call_back_buffer = (CallBackBuffer *) extra;
+
+    pthread_mutex_lock(&call_back_buffer->mutex);
+    call_back_buffer->count = 1;
+    pthread_mutex_unlock(&call_back_buffer->mutex);
 }
 
 void admin_disconnection_callback(int32_t err, hb_admin_t admin, void *extra){
@@ -513,7 +517,17 @@ static PyObject *Connection_close(Connection *self) {
             sleep(0.1);
         }
 
-        hb_client_destroy(self->client, cl_dsc_cb, NULL);
+        call_back_buffer->count = 0;
+
+        hb_client_destroy(self->client, cl_dsc_cb, call_back_buffer);
+        local_count = 0;
+        while (local_count != 1) {
+            pthread_mutex_lock(&call_back_buffer->mutex);
+            local_count = call_back_buffer->count;
+            pthread_mutex_unlock(&call_back_buffer->mutex);
+            sleep(0.1);
+        }
+
         hb_connection_destroy(self->conn);
         self->is_open = false;
     }
