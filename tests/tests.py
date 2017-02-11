@@ -308,8 +308,6 @@ class TestCTablePut(unittest.TestCase):
         self.assertRaises(TypeError, self.table.put, "foo",  {"f:foo": "bar"}, None, 'invalid')
 
 
-
-
 class TestCTableTimestamp(unittest.TestCase):
     def setUp(self):
         self.connection = _connection(ZOOKEEPERS)
@@ -367,6 +365,9 @@ class TestCTableTimestamp(unittest.TestCase):
         row = self.table.row('foo', None, None, True)
         self.assertEquals(row, {})
 
+        row = self.table.row('foo', None, 5)
+        self.assertEquals(row, {})
+
     def test_happy_delete_update_2(self):
         self.table.put('foo', {'f:foo': 'foo'}, 5)
         self.table.put('foo', {'f:foo': 'bar'}, 10)
@@ -374,14 +375,25 @@ class TestCTableTimestamp(unittest.TestCase):
         row = self.table.row('foo', None, None, True)
         self.assertEquals(row, {'f:foo': ('bar', 10)})
 
+        row = self.table.row('foo', None, 5, True)
+        self.assertEquals(row, {})
+
     def test_happy_delete_update_3(self):
         self.table.put('foo', {'f:foo': 'foo'}, 5)
         self.table.put('foo', {'f:foo': 'bar'}, 10)
         self.table.put('foo', {'f:foo': 'baz'}, 15)
         self.table.delete('foo', None, 10)
 
+        row = self.table.row('foo', None, 5, True)
+        self.assertEquals(row, {})
+
+        row = self.table.row('foo', None, 10, True)
+        self.assertEquals(row, {})
+
         row = self.table.row('foo', None, None, True)
         self.assertEquals(row, {'f:foo': ('baz', 15)})
+
+
 
     def test_scan_happy(self):
         for i in range(0, 10):
@@ -403,6 +415,87 @@ class TestCTableTimestamp(unittest.TestCase):
             i += 1
 
         self.assertEquals(i, 0)
+
+    def test_batch_put_happy(self):
+        self.table.batch([('put', 'foo%i' % i, {'f:foo': 'foo%i' % i}, 5, None) for i in range(10)])
+
+        i = 0
+        for row, data in self.table.scan('','', None, None, None, True):
+            self.assertEquals(row, 'foo%i' % i)
+            self.assertEquals(data, {'f:foo': ('foo%i' % i, 5)})
+            i += 1
+
+        self.table.batch([('put', 'foo%i' % i, {'f:foo': 'foo%i' % i}, 10, None) for i in range(10)])
+
+        i = 0
+        for row, data in self.table.scan('', '', None, None, None, True):
+            self.assertEquals(row, 'foo%i' % i)
+            self.assertEquals(data, {'f:foo': ('foo%i' % i, 10)})
+            i += 1
+
+    def test_batch_delete_happy(self):
+        self.table.batch([('put', 'foo%i' % i, {'f:foo': 'foo%i' % i}, 5, None) for i in range(10)])
+        self.table.batch([('delete', 'foo%i' % i, None, 5, None) for i in range(10)])
+        i = 0
+        for row, data in self.table.scan():
+            i += 1
+
+        self.assertEquals(i, 0)
+
+    def test_batch_delete_happy_1(self):
+        self.table.batch([('put', 'foo%i' % i, {'f:foo': 'foo%i' % i}, 5, None) for i in range(10)])
+        self.table.batch([('put', 'foo%i' % i, {'f:foo': 'foo%i' % i}, 10, None) for i in range(10)])
+        self.table.batch([('delete', 'foo%i' % i, None, 5, None) for i in range(10)])
+
+        i = 0
+        for row, data in self.table.scan('', '', None, None, 5, True):
+            i += 1
+
+        self.assertEquals(i, 0)
+
+        for row, data in self.table.scan('', '', None, None, 10, True):
+            i += 1
+
+        self.assertEquals(i, 10)
+
+    def test_batch_delete_happy_2(self):
+        self.table.batch([('put', 'foo%i' % i, {'f:foo': 'foo%i' % i}, 5, None) for i in range(10)])
+        self.table.batch([('put', 'foo%i' % i, {'f:foo': 'foo%i' % i}, 10, None) for i in range(10)])
+        self.table.batch([('delete', 'foo%i' % i, None, 10, None) for i in range(10)])
+
+        i = 0
+        for row, data in self.table.scan('', '', None, None, 10, True):
+            i += 1
+
+        self.assertEquals(i, 0)
+
+        for row, data in self.table.scan('', '', None, None, 5, True):
+            i += 1
+
+        self.assertEquals(i, 0)
+
+    def test_batch_delete_happy_3(self):
+        self.table.batch([('put', 'foo%i' % i, {'f:foo': 'foo%i' % i}, 5, None) for i in range(10)])
+        self.table.batch([('put', 'foo%i' % i, {'f:foo': 'foo%i' % i}, 10, None) for i in range(10)])
+        self.table.batch([('put', 'foo%i' % i, {'f:foo': 'foo%i' % i}, 15, None) for i in range(10)])
+        self.table.batch([('delete', 'foo%i' % i, None, 10, None) for i in range(10)])
+
+        i = 0
+        for row, data in self.table.scan('', '', None, None, 5, True):
+            i += 1
+
+        self.assertEquals(i, 0)
+
+        i = 0
+        for row, data in self.table.scan('', '', None, None, 10, True):
+            i += 1
+
+        self.assertEquals(i, 0)
+
+        for row, data in self.table.scan('', '', None, None, 15, True):
+            i += 1
+
+        self.assertEquals(i, 10)
 
 
 
@@ -644,6 +737,7 @@ class TestCTableScanStartStop(unittest.TestCase):
 
         self.assertEquals(i, 0)
 
+
 class TestCTableScan(unittest.TestCase):
     def setUp(self):
         self.connection = _connection(ZOOKEEPERS)
@@ -761,10 +855,59 @@ class TestCTableBatch(unittest.TestCase):
         errors, results = self.table.batch(actions)
         self.assertEquals(errors, len(actions) - 1)
 
-
     def test_empty_actions(self):
         errors, results = self.table.batch([])
         self.assertEquals(errors, 0)
+
+    def test_put_timestamp_type(self):
+        errors, results = self.table.batch([('put', 'a', {'f:foo': 'bar'}, None)])
+        self.assertEquals(errors, 0)
+
+        errors, results = self.table.batch([('put', 'a', {'f:foo': 'bar'}, 5)])
+        self.assertEquals(errors, 0)
+
+        errors, results = self.table.batch([('put', 'a', {'f:foo': 'bar'}, 'invalid')])
+        self.assertEquals(errors, 1)
+
+    def test_delete_timestamp_type(self):
+        errors, results = self.table.batch([('delete', 'a', None, None)])
+        self.assertEquals(errors, 0)
+
+        errors, results = self.table.batch([('delete', 'a', None, 5)])
+        self.assertEquals(errors, 0)
+
+        errors, results = self.table.batch([('delete', 'a', None, 'invalid')])
+        self.assertEquals(errors, 1)
+
+    def test_put_is_wal_type(self):
+        errors, results = self.table.batch([('put', 'a', {'f:foo': 'bar'}, None, None)])
+        self.assertEquals(errors, 0)
+
+        errors, results = self.table.batch([('put', 'a', {'f:foo': 'bar'}, None, True)])
+        self.assertEquals(errors, 0)
+
+        errors, results = self.table.batch([('put', 'a', {'f:foo': 'bar'}, None, False)])
+        self.assertEquals(errors, 0)
+
+        errors, results = self.table.batch([('put', 'a', {'f:foo': 'bar'}, None, 'invalid')])
+        self.assertEquals(errors, 1)
+
+    def test_delete_is_wal_type(self):
+        errors, results = self.table.batch([('delete', 'a', None, None, None)])
+        self.assertEquals(errors, 0)
+
+        errors, results = self.table.batch([('delete', 'a', None, None, True)])
+        self.assertEquals(errors, 0)
+
+        errors, results = self.table.batch([('delete', 'a', None, None, False)])
+        self.assertEquals(errors, 0)
+
+        errors, results = self.table.batch([('delete', 'a', None, None, 'invalid')])
+        self.assertEquals(errors, 1)
+
+
+
+
 
 
 class TestPythonHappy(unittest.TestCase):

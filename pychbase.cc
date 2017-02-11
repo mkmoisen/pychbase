@@ -2056,7 +2056,6 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
         }
     }
 
-
     RowBuffer *row_buf = new RowBuffer();
     if (!row_buf) {
         // TODO do I need a call back here like on that segfault bug for admin_destroy
@@ -2435,6 +2434,21 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
             continue;
         }
 
+        // Must contain type and row key at this point
+        if (PyTuple_Size(tuple) < 2) {
+            pthread_mutex_lock(&batch_call_back_buffer->mutex);
+            batch_call_back_buffer->errors++;
+            batch_call_back_buffer->count++;
+            pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+
+            call_back_buffer->count++;
+            call_back_buffer->err = 12;
+
+            delete rowBuf;
+
+            continue;
+        }
+
         PyObject *mutation_type = PyTuple_GetItem(tuple, 0);
         // Is this check even necessary
         if (!mutation_type) {
@@ -2530,7 +2544,25 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
         }
 
         if (strcmp(mutation_type_char, "put") == 0) {
+            // Must contain type, row key, data at this point
+            if (PyTuple_Size(tuple) < 3) {
+                // TODO this is only valid if I have a bug as opposed to the user. Would it be better to crash?
+                pthread_mutex_lock(&batch_call_back_buffer->mutex);
+                batch_call_back_buffer->errors++;
+                batch_call_back_buffer->count++;
+                pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+
+                call_back_buffer->count++;
+                call_back_buffer->err = -1; // TODO BETTER
+
+                delete rowBuf;
+
+                continue;
+            }
+
+            // TODO DO I NEED TO DECREF DICT TIMESTAMP AND IS ALL ?
             PyObject *dict = PyTuple_GetItem(tuple, 2);
+
             // Is this check even necessary
             if (!dict) {
                 pthread_mutex_lock(&batch_call_back_buffer->mutex);
@@ -2553,16 +2585,75 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
                 pthread_mutex_unlock(&batch_call_back_buffer->mutex);
 
                 call_back_buffer->count++;
-                call_back_buffer->err = -1;
+                call_back_buffer->err = -1; // TODO BETTER
 
                 delete rowBuf;
 
                 continue;
             }
 
+
+            // Will be NULL if its out of bounds (and sets index error, not sure if that is good)
+            // TODO can PyTuple_GetItem ever be the result of OOM? Not sure it says borrowed reference I would think not
+            // If so then this trick will result in a bug
+            PyObject *timestamp = NULL;
+            uint64_t timestamp_int = NULL;
+            if (PyTuple_Size(tuple) > 3) {
+                timestamp = PyTuple_GetItem(tuple, 3); // Change to GETITEM?
+            }
+
+            // Will be NULL if its out of bounds(and sets index error, not sure if that is good)
+            PyObject *is_wal = NULL;
+            bool is_wal_bool = true;
+            if (PyTuple_Size(tuple) > 4) {
+                is_wal = PyTuple_GetItem(tuple, 4); // CHANGE TO GETITEM?
+            }
+
+
+            if (timestamp) {
+                if (timestamp != Py_None) {
+                    if (!PyInt_Check(timestamp)) {
+                        pthread_mutex_lock(&batch_call_back_buffer->mutex);
+                        batch_call_back_buffer->errors++;
+                        batch_call_back_buffer->count++;
+                        pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+
+                        call_back_buffer->count++;
+                        call_back_buffer->err = -1; // TODO BETTER
+
+                        delete rowBuf;
+
+                        continue;
+                    }
+                    timestamp_int = PyInt_AsSsize_t(timestamp);
+                }
+            }
+
+            if (is_wal) {
+                if (is_wal != Py_None) {
+                    if (!PyObject_TypeCheck(is_wal, &PyBool_Type)) {
+                        pthread_mutex_lock(&batch_call_back_buffer->mutex);
+                        batch_call_back_buffer->errors++;
+                        batch_call_back_buffer->count++;
+                        pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+
+                        call_back_buffer->count++;
+                        call_back_buffer->err = -1; // TODO BETTER
+
+                        delete rowBuf;
+
+                        continue;
+                    }
+                    if (!PyObject_IsTrue(is_wal)) {
+                        is_wal_bool = false;
+                    }
+                }
+            }
+
+
             hb_put_t hb_put = NULL;
             // todo add timestamp
-            err = make_put(self, rowBuf, row_key_char, dict, &hb_put, is_bufferable_bool, NULL, true);
+            err = make_put(self, rowBuf, row_key_char, dict, &hb_put, is_bufferable_bool, timestamp_int, is_wal_bool);
             if (err != 0) {
                 pthread_mutex_lock(&batch_call_back_buffer->mutex);
                 batch_call_back_buffer->errors++;
@@ -2602,9 +2693,69 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
             }
 
         } else if (strcmp(mutation_type_char, "delete") == 0) {
+
+            // TODO add columns PyTuple_GetItem(tuple, 2)
             hb_delete_t hb_delete = NULL;
-            // todo add timestamp
-            err = make_delete(self, row_key_char, &hb_delete, NULL, true);
+
+            // Will return NULL if out of bounds (and sets type exception)
+            // TODO can PyTuple_GetItem ever be the result of OOM? Not sure it says borrowed reference I would think not
+            // If so then this trick will result in a bug
+            PyObject *timestamp = NULL;
+            uint64_t timestamp_int = NULL;
+            if (PyTuple_Size(tuple) > 3) {
+                timestamp = PyTuple_GetItem(tuple, 3); // CHANGE TO GETITEM
+            }
+
+            // Will return NULL if out of bounds (and sets type exception)
+            PyObject *is_wal = NULL;
+            bool is_wal_bool = true;
+            if (PyTuple_Size(tuple) > 4) {
+                is_wal = PyTuple_GetItem(tuple, 4); // CHANGE TO GETITEM
+            }
+
+
+            // TODO DO I NEED TO DECREF TIMESTAMP AND IS_WAL
+
+            if (timestamp) {
+                if (timestamp != Py_None) {
+                    if (!PyInt_Check(timestamp)) {
+                        pthread_mutex_lock(&batch_call_back_buffer->mutex);
+                        batch_call_back_buffer->errors++;
+                        batch_call_back_buffer->count++;
+                        pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+
+                        call_back_buffer->count++;
+                        call_back_buffer->err = -1; // TODO BETTER
+
+                        delete rowBuf;
+
+                        continue;
+                    }
+                    timestamp_int = PyInt_AsSsize_t(timestamp);
+                }
+            }
+            if (is_wal) {
+                if (is_wal != Py_None) {
+                    if (!PyObject_TypeCheck(is_wal, &PyBool_Type)) {
+                        pthread_mutex_lock(&batch_call_back_buffer->mutex);
+                        batch_call_back_buffer->errors++;
+                        batch_call_back_buffer->count++;
+                        pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+
+                        call_back_buffer->count++;
+                        call_back_buffer->err = -1; // TODO BETTER
+
+                        delete rowBuf;
+
+                        continue;
+                    }
+                    if (!PyObject_IsTrue(is_wal)) {
+                        is_wal_bool = false;
+                    }
+                }
+            }
+
+            err = make_delete(self, row_key_char, &hb_delete, timestamp_int, is_wal_bool);
             if (err != 0) {
                 pthread_mutex_lock(&batch_call_back_buffer->mutex);
                 batch_call_back_buffer->errors++;

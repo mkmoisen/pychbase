@@ -127,7 +127,7 @@ class Table(object):
         self.connection.close()
 
     def batch(self, timestamp=None, batch_size=None, transaction=False, wal=True):
-        return Batch(self, timestamp, batch_size)
+        return Batch(self, timestamp, batch_size, transaction, wal)
 
     def families(self):
         # I see no way to do this with libhbase
@@ -162,12 +162,39 @@ class Batch(object):
         self._transaction = transaction
         self._wal = wal
 
-    def put(self, row, data, wal=None):
-        self._actions.append(('put', row, data))
+    def put(self, row, data, wal=None, **kwargs):
+        # TODO With libhbase I could probably include a timestamp to the `put` method
+        is_wal = self._wal
+        if wal is not None:
+            is_wal = wal
+
+        if 'timestamp' in kwargs:
+            timestamp = kwargs['timestamp']
+        else:
+            timestamp = self._timestamp
+
+        if timestamp is not None:
+            if not isinstance(timestamp, int):
+                raise TypeError("timestamp must be int")
+
+        self._actions.append(('put', row, data, timestamp, is_wal)) # Probably insert timestamp and wal here
         self._check_send()
 
-    def delete(self, row, columns=None, wal=None):
-        self._actions.append(('delete', row))
+    def delete(self, row, columns=None, wal=None, **kwargs):
+        is_wal = self._wal
+        if wal is not None:
+            is_wal = wal
+
+        if 'timestamp' in kwargs:
+            timestamp = kwargs['timestamp']
+        else:
+            timestamp = self._timestamp
+
+        if timestamp is not None:
+            if not isinstance(timestamp, int):
+                raise TypeError("timestamp must be int")
+
+        self._actions.append(('delete', row, columns, timestamp, is_wal)) # Probably insert timestamp and wal here
         self._check_send()
 
     def _check_send(self):
