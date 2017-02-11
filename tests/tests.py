@@ -137,6 +137,9 @@ class TestCConnectionManageTable(unittest.TestCase):
         connection = _connection(ZOOKEEPERS)
         connection.create_table(TABLE_NAME, {u'f': {u'max_versions': 1}})
 
+    def test_special_symbols_in_table_name(self):
+        raise NotImplementedError
+
 
 
 
@@ -310,7 +313,10 @@ class TestCTablePut(unittest.TestCase):
 class TestCTableTimestamp(unittest.TestCase):
     def setUp(self):
         self.connection = _connection(ZOOKEEPERS)
-        self.connection.create_table(TABLE_NAME, {'f': {}})
+        try:
+            self.connection.create_table(TABLE_NAME, {'f': {}})
+        except ValueError:
+            pass
         self.table = _table(self.connection, TABLE_NAME)
 
     def tearDown(self):
@@ -686,9 +692,15 @@ class TestCTableBatch(unittest.TestCase):
         self.assertEquals(errors, 0)
 
 
-class TestPython(unittest.TestCase):
+class TestPythonHappy(unittest.TestCase):
     def setUp(self):
-        pass
+        connection = Connection()
+        try:
+            connection.delete_table(TABLE_NAME)
+        except ValueError:
+            pass
+
+        connection.close()
 
     def tearDown(self):
         connection = Connection()
@@ -784,6 +796,71 @@ class TestPython(unittest.TestCase):
             i += 1
 
         self.assertEquals(i, 0)
+
+
+class TestPythonRowPrefix(unittest.TestCase):
+    def setUp(self):
+        # TODO Configure this for non-mapr users
+        self.connection = Connection()
+        try:
+            self.connection.create_table(TABLE_NAME, {'f': {}})
+        except ValueError:
+            pass
+        self.table = self.connection.table(TABLE_NAME)
+        batch = self.table.batch()
+        batch.put('a', {'f:foo': 'foo'})
+        for i in range(10):
+            batch.put('b%i' % i, {'f:foo': 'bar'})
+        batch.put('c', {'f:foo': 'baz'})
+        batch.send()
+
+    def tearDown(self):
+        try:
+            self.connection.delete_table(TABLE_NAME)
+        except ValueError:
+            pass
+        self.connection.close()
+
+    def test_row_prefix_happy(self):
+        i = 0
+        for row, data in self.table.scan(row_prefix='b'):
+            self.assertEquals(row, 'b%i' % i)
+            self.assertEquals(data, {'f:foo': 'bar'})
+            i += 1
+
+        self.assertEquals(i, 10)
+
+    def test_start_happy(self):
+        i = 0
+        for row, data in self.table.scan(start='b'):
+            i += 1
+
+        self.assertEquals(row, 'c')
+        self.assertEquals(data, {'f:foo': 'baz'})
+        self.assertEquals(i, 11)
+
+    def test_stop_happy(self):
+        i = 0
+        for row, data in self.table.scan(stop='b9~'):
+            i += 1
+
+        self.assertEquals(row, 'b9')
+        self.assertEquals(data, {'f:foo': 'bar'})
+        self.assertEquals(i, 11)
+
+    def test_start_stop_happy(self):
+        i = 2
+        for row, data in self.table.scan(start='b2', stop='b5~'):
+            self.assertEquals(row, 'b%i' % i)
+            self.assertEquals(data, {'f:foo': 'bar'})
+            i += 1
+
+        self.assertEquals(i, 6)
+
+    def test_mix(self):
+        self.assertRaises(TypeError, self.table.scan(start='foo', stop='bar', row_prefix='foobar'))
+        self.assertRaises(TypeError, self.table.scan(start='foo', row_prefix='foobar'))
+        self.assertRaises(TypeError, self.table.scan(stop='bar', row_prefix='foobar'))
 
 
 if __name__ == '__main__':

@@ -596,14 +596,14 @@ static PyObject *Connection_open(Connection *self) {
         if (err != 0) {
             PyErr_SetString(HBaseError, "Could not create client from connection");
             return NULL;
-        }
+        }// TODO destroy connection
         OOM_OBJ_RETURN_NULL(self->client);
 
         err = hb_admin_create(self->conn, &self->admin);
         if (err != 0) {
             PyErr_SetString(PyExc_ValueError, "Could not create admin from connection");
             return NULL;
-        }
+        }// TODO destroy connection and client
         OOM_OBJ_RETURN_NULL(self->admin);
 
         self->is_open = true;
@@ -1204,7 +1204,6 @@ static PyObject *Table_row(Table *self, PyObject *args) {
     }
 
     if (timestamp_int) {
-        printf("I am setting timestamp on get to %i\n", timestamp_int);
         // happybase is inclusive, libhbasec is exclusive
         // TODO submit patch for exclusive in documentation
         err = hb_get_set_timerange(get, NULL, timestamp_int + 1);
@@ -1581,6 +1580,7 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
         return err;
     }
 
+    // TODO this returns 95 for any value: EOPNOTSUPP  Operation not supported on transport endpoint
     if (is_wal) {
         hb_mutation_set_durability((hb_mutation_t) *hb_put, DURABILITY_SYNC_WAL);
     } else {
@@ -1626,8 +1626,6 @@ static PyObject *Table_put(Table *self, PyObject *args) {
 
     }
 
-
-
     int err = 0;
 
     RowBuffer *row_buf = new RowBuffer();
@@ -1641,7 +1639,6 @@ static PyObject *Table_put(Table *self, PyObject *args) {
 
     hb_put_t hb_put = NULL; // This must be initialized to NULL or else hb_mutation_destroy could fail
 
-    // TODO add timestamp
     err = make_put(self, row_buf, row_key, dict, &hb_put, false, timestamp_int, is_wal_bool);
     if (err != 0) {
         delete row_buf;
@@ -2164,9 +2161,13 @@ static int make_delete(Table *self, char *row_key, hb_delete_t *hb_delete, uint6
     }
 
     if (timestamp) {
-        hb_delete_set_timestamp((hb_mutation_t) *hb_delete, timestamp);
+        err = hb_delete_set_timestamp((hb_mutation_t) *hb_delete, timestamp);
+    }
+    if (err != 0) {
+        return err;
     }
 
+    // TODO this returns 95 for any value: EOPNOTSUPP  Operation not supported on transport endpoint
     if (is_wal) {
         hb_mutation_set_durability((hb_mutation_t) *hb_delete, DURABILITY_SYNC_WAL);
     } else {
@@ -2215,23 +2216,20 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
         }
     }
 
-    printf("timestamp_int is %i\n", timestamp_int);
-
     int err = 0;
 
     // TODO Do I need to check to see if hb_delete is null inside of the make_delete function?
     hb_delete_t hb_delete = NULL;
-    // todo add timestamp
     err = make_delete(self, row_key, &hb_delete, timestamp_int, is_wal_bool);
     OOM_ERRNO_RETURN_NULL(err);
     if (err != 0) {
         hb_mutation_destroy((hb_mutation_t) hb_delete);
         if (err == -5) {
             PyErr_SetString(PyExc_ValueError, "row_key was empty string");
-            return NULL;
         } else {
             PyErr_Format(PyExc_ValueError, "Failed to create Delete with rowkey '%s' or set it's Table with '%s': %i", row_key, self->table_name, err);
         }
+        return NULL;
     }
 
     // I'm not even using the row_buf for deletes

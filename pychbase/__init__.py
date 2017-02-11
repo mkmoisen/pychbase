@@ -59,17 +59,25 @@ class Table(object):
         self._table = _table(connection._connection, table_name)
 
     def row(self, row, columns=None, timestamp=None, include_timestamp=False):
-        return self._table.row(row)
+        return self._table.row(row, columns, timestamp, include_timestamp)
 
     def put(self, row, data, timestamp=None, wal=True):
         return self._table.put(row, data, timestamp, wal)
 
     def delete(self, row, columns=None, timestamp=None, wal=True):
-        return self._table.delete(row)
+        return self._table.delete(row, columns, timestamp, wal)
 
-    def scan(self, start='', stop='', *args, **kwargs):
-        # Should start and stop default to None ?
-        # TODO Add filters
+    def scan(self, start=None, stop=None, row_prefix=None, *args, **kwargs):
+        if row_prefix is None:
+            if start is None:
+                start = ''
+            if stop is None:
+                stop = ''
+        else:
+            if start or stop:
+                raise TypeError("Do not use start/stop in conjunction with row_prefix")
+            start = row_prefix
+            stop = row_prefix + '~'
         for k, v in self._table.scan(start, stop):
             yield k, v
 
