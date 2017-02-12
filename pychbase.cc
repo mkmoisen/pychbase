@@ -2226,40 +2226,29 @@ void delete_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_res
     // TODO In the extraordinary event that this is null, is it better to just segfault as its such an extreme bug?
     CallBackBuffer *call_back_buffer = (CallBackBuffer *) extra;
 
+    pthread_mutex_lock(&call_back_buffer->mutex);
     if (err != 0) {
-        pthread_mutex_lock(&call_back_buffer->mutex);
         call_back_buffer->err = err;
-        call_back_buffer->count = 1;
-
-        delete call_back_buffer->rowBuf;
-
-        if (call_back_buffer->batch_call_back_buffer) {
-            pthread_mutex_lock(&call_back_buffer->batch_call_back_buffer->mutex);
-            call_back_buffer->batch_call_back_buffer->errors++;
-            call_back_buffer->batch_call_back_buffer->count++;
-            pthread_mutex_unlock(&call_back_buffer->batch_call_back_buffer->mutex);
-        }
-        pthread_mutex_unlock(&call_back_buffer->mutex);
-
-        hb_mutation_destroy(mutation);
-
-        return;
     }
 
-    pthread_mutex_lock(&call_back_buffer->mutex);
     call_back_buffer->count = 1;
 
     delete call_back_buffer->rowBuf;
 
     if (call_back_buffer->batch_call_back_buffer) {
         pthread_mutex_lock(&call_back_buffer->batch_call_back_buffer->mutex);
+        if (err != 0) {
+            call_back_buffer->batch_call_back_buffer->errors++;
+        }
+
         call_back_buffer->batch_call_back_buffer->count++;
         pthread_mutex_unlock(&call_back_buffer->batch_call_back_buffer->mutex);
     }
-
     pthread_mutex_unlock(&call_back_buffer->mutex);
-    
+
     hb_mutation_destroy(mutation);
+
+    return;
 }
 
 /*
