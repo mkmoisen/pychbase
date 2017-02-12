@@ -773,11 +773,21 @@ error:
     return NULL;
 }
 
+// Used to pass the different functions that can set attributes on a column family
 typedef int32_t (*set_column_family_attribute)(hb_columndesc, int32_t);
 
 static PyObject *Connection_create_table(Connection *self, PyObject *args) {
     char *table_name;
     PyObject *dict;
+
+    PyObject *column_family_name;
+    PyObject *column_family_attributes;
+    // To loop through dict
+    Py_ssize_t i = 0;
+    // To keep track of column families
+    int counter = 0;
+
+    int number_of_families;
 
     if (!PyArg_ParseTuple(args, "sO!", &table_name, &PyDict_Type, &dict)) {
         return NULL;
@@ -791,72 +801,44 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
 
     int table_name_length = strlen(table_name);
     // TODO verify the exact length at which this becomes illegal
-    if (table_name_length > 1000) {
-        PyErr_SetString(PyExc_ValueError, "Table name is too long\n");
-        return NULL;
-    }
+    CHECK_SET_EXC(table_name_length <= 1000, PyExc_ValueError, "Table name is too long\n");
 
     err = hb_admin_table_exists(self->admin, NULL, table_name);
-    if (err == 0) {
-        PyErr_Format(PyExc_ValueError, "Table '%s' already exists\n", table_name);
-        return NULL;
-    }
+    CHECK_FORMAT_EXC(err != 0, PyExc_ValueError, "Table '%s' already exists\n", table_name);
 
-    PyObject *column_family_name;
-    PyObject *column_family_attributes;
-    Py_ssize_t i = 0;
-
-    int number_of_families = PyDict_Size(dict);
-    if (number_of_families < 1) {
-        PyErr_SetString(PyExc_ValueError, "Need at least one column family");
-        return NULL;
-    }
+    number_of_families = PyDict_Size(dict);
+    CHECK_SET_EXC(number_of_families >= 1, PyExc_ValueError, "Need at least one column family\n");
 
     hb_columndesc families[number_of_families];
 
-    int counter = 0;
-
     while (PyDict_Next(dict, &i, &column_family_name, &column_family_attributes)) {
+        PyObject *key, *value;
+        // Used for looping over column_family_attributes
+        Py_ssize_t o = 0;
 
-        if (!PyObject_TypeCheck(column_family_name, &PyBaseString_Type)) {
-            PyErr_SetString(PyExc_TypeError, "Key must be string");
-            return NULL;
-        }
-
-        if (!PyDict_Check(column_family_attributes)) {
-            PyErr_SetString(PyExc_TypeError, "Attributes must be a dict");
-            return NULL;
-        }
+        CHECK_SET_EXC(PyObject_TypeCheck(column_family_name, &PyBaseString_Type), PyExc_TypeError, "Key must be string\n");
+        CHECK_SET_EXC(PyDict_Check(column_family_attributes), PyExc_TypeError,  "Attributes must be a dict\n");
 
         char *column_family_name_char = PyString_AsString(column_family_name);
-        OOM_OBJ_RETURN_NULL(column_family_name_char);
+        CHECK_MEM_EXC(column_family_name_char); // Is this necessary
 
         err = hb_coldesc_create((byte_t *)column_family_name_char, strlen(column_family_name_char) + 1, &families[counter]);
-        if (err != 0) {
-            PyErr_Format(PyExc_ValueError, "Failed to create column descriptor '%s'", column_family_name_char);
-            return NULL;
-        }
+        CHECK_FORMAT_EXC(err == 0, PyExc_ValueError, "Failed to create column descriptor '%s'\n", column_family_name_char);
 
         //Py_ssize_t dict_size = PyDict_Size(column_family_attributes);
-        PyObject *key, *value;
-        Py_ssize_t o = 0;
+
         while (PyDict_Next(column_family_attributes, &o, &key, &value)) {
-            if (!PyObject_TypeCheck(key, &PyBaseString_Type)) {
-                PyErr_SetString(PyExc_TypeError, "Key must be string");
-                return NULL;
-            }
-            if (!PyInt_Check(value)) {
-                PyErr_SetString(PyExc_TypeError, "Value must be int");
-                return NULL;
-            }
+            set_column_family_attribute func;
+
+            CHECK_SET_EXC(PyObject_TypeCheck(key, &PyBaseString_Type), PyExc_TypeError,  "Key must be string\n");
+            CHECK_SET_EXC(PyInt_Check(value), PyExc_TypeError,  "Value must be int\n");
 
             char *key_char = PyString_AsString(key);
-            OOM_OBJ_RETURN_NULL(key_char);
-
-            set_column_family_attribute func;
+            CHECK_MEM_EXC(key_char); // Is this necessary
 
             int value_int = PyInt_AsSsize_t(value);
 
+            // TODO these should be enums ?
             if (strcmp(key_char, "max_versions") == 0) {
                 func = &hb_coldesc_set_maxversions;
 
@@ -870,30 +852,29 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
                 func = &hb_coldesc_set_inmemory;
 
             } else {
-                PyErr_SetString(PyExc_ValueError, "Only max_versions, min_version, time_to_live, or in_memory permitted");
-                return NULL;
+                CHECK_SET_EXC(0, PyExc_ValueError, "Only max_versions, min_version, time_to_live, or in_memory permitted\n");
+
             }
 
             int err = (*func)(families[counter], value_int);
-            if (err != 0) {
-                    PyErr_Format(PyExc_ValueError, "Failed to add '%s' to column desc: %i", key_char, err);
-                    return NULL;
-                }
+            CHECK_FORMAT_EXC(err == 0, PyExc_ValueError, "Failed to add '%s' to column desc: %i\n", key_char, err);
         }
         counter++;
     }
 
     err = hb_admin_table_create(self->admin, NULL, table_name, families, number_of_families);
 
+    // TODO If there is an error above, these will never be destoryed...
     for (counter = 0; counter < number_of_families; counter++) {
         hb_coldesc_destroy(families[counter]);
     }
+
 
     if (err != 0) {
         if (err == 36) {
             PyErr_SetString(PyExc_ValueError, "Table name is too long\n");
         } else {
-            PyErr_Format(PyExc_ValueError, "Failed to admin table create: %i", err);
+            PyErr_Format(PyExc_ValueError, "Failed to create table '%s': %i\n", table_name, err);
         }
 
         // Sometimes if it fails to create, the table still gets created but doesn't work?
@@ -904,10 +885,24 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
         // I don't care if this succeeds or not
         Connection_delete_table(self, table_name_obj);
 
-        return NULL;
+        // TODO don't I need to decref table_name_obj?
+
+        //return NULL;
+        goto error;
     }
 
     Py_RETURN_NONE;
+
+error:
+    /*
+    // This is throwing a segmentation fault
+    for (counter = 0; counter < number_of_families; counter++) {
+        if (hb_coldesc_destroy(families[counter])) {
+            hb_coldesc_destroy(families[counter]);
+        }
+    }
+    */
+    return NULL;
 }
 
 
