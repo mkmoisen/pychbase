@@ -13,14 +13,6 @@
 #endif
 
 
-#define CHECK(A)      \
-    do {                \
-        if (!(A)) {     \
-            goto error; \
-        }               \
-    } while (0);
-
-
 #define OOM_OBJ_RETURN_NULL(obj) \
     do {                        \
         if (!obj) {                 \
@@ -69,8 +61,34 @@
     do {    \
         if (!(A)) { \
             PyErr_SetNone(PyExc_MemoryError);   \
+            goto error; \
         }   \
     } while (0);
+
+
+#define CHECK(A) \
+    do {    \
+        if (!(A)) { \
+            goto error;   \
+        }   \
+    } while (0);
+
+#define CHECK_ERRNO(A, errno) \
+    do {    \
+        if (!(A)) { \
+           err = errno; \
+           goto error; \
+        }   \
+    } while (0);
+
+#define CHECK_MEM(A) \
+    do {    \
+        if (!(A)) { \
+            err = 12;   \
+            goto error; \
+        }   \
+    } while (0);
+
 
 
 static PyObject *SpamError;
@@ -1092,7 +1110,7 @@ static int read_result(hb_result_t result, PyObject *dict, bool include_timestam
         }
 
 
-         PyObject *key = Py_BuildValue("s", fq);
+        PyObject *key = Py_BuildValue("s", fq);
 
         free(fq);
         if (!key) {
@@ -1142,35 +1160,12 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
     // TODO consider that option^
     CallBackBuffer *call_back_buffer = (CallBackBuffer *) extra;
 
-    if (err != 0) {
-        pthread_mutex_lock(&call_back_buffer->mutex);
-        call_back_buffer->err = err;
-        call_back_buffer->count = 1;
-        delete call_back_buffer->rowBuf;
-        pthread_mutex_unlock(&call_back_buffer->mutex);
+    PyObject *dict = NULL;
 
-        // Destroying a NULL result/get shouldn't cause a bug
-        hb_result_destroy(result);
-        hb_get_destroy(get);
-
-        return;
-    }
-
-    if (!result) {
-        // Note that if there is no row for the rowkey, result is not NULL
-        // I doubt err wouldn't be 0 if result is null
-        pthread_mutex_lock(&call_back_buffer->mutex);
-        call_back_buffer->err = 12;
-        call_back_buffer->count = 1;
-        delete call_back_buffer->rowBuf;
-        pthread_mutex_unlock(&call_back_buffer->mutex);
-
-        // Destroying a NULL result shouldn't cause a bug
-        hb_result_destroy(result);
-        hb_get_destroy(get);
-
-        return;
-    }
+    CHECK(err == 0);
+    // Note that if there is no row for the rowkey, result is not NULL
+    // I doubt err wouldn't be 0 if result is null
+    CHECK_MEM(result);
 
     /*
     const byte_t *key;
@@ -1181,48 +1176,56 @@ static void row_callback(int32_t err, hb_client_t client, hb_get_t get, hb_resul
     */
 
     // Do I need to dec ref? I don't know, memory isn't increasing when i run this in a loop
-    PyObject *dict = PyDict_New();
-    if (!dict) {
-        pthread_mutex_lock(&call_back_buffer->mutex);
-        call_back_buffer->err = 12;
-        call_back_buffer->count = 1;
-        delete call_back_buffer->rowBuf;
-        pthread_mutex_unlock(&call_back_buffer->mutex);
-
-        hb_result_destroy(result);
-        hb_get_destroy(get);
-
-        return;
-    }
+    dict = PyDict_New();
+    CHECK_MEM(dict);
 
     // TODO Do I need a lock to access call_back_buffer->include_timestamp? I wouldn't think so..
-    pthread_mutex_lock(&call_back_buffer->mutex);
+    //pthread_mutex_lock(&call_back_buffer->mutex);
     err = read_result(result, dict, call_back_buffer->include_timestamp);
-    pthread_mutex_unlock(&call_back_buffer->mutex);
+    //pthread_mutex_unlock(&call_back_buffer->mutex);
+    // TODO do I need to decref all the values this dict is holding on err?
+    CHECK(err == 0);
 
-    if (err != 0) {
-        pthread_mutex_lock(&call_back_buffer->mutex);
-        call_back_buffer->err = err;
-        call_back_buffer->count = 1;
-        delete call_back_buffer->rowBuf;
-        pthread_mutex_unlock(&call_back_buffer->mutex);
-
-        // TODO do I need to decref all the values this dict is holding?
-        hb_result_destroy(result);
-        hb_get_destroy(get);
-        Py_DECREF(dict);
-
-        return;
-    }
-
+error:
+    // Happy path reuses this up until Py_XDECREF(dict);
     pthread_mutex_lock(&call_back_buffer->mutex);
-    call_back_buffer->ret = dict;
+    call_back_buffer->err = err;
+    if (dict) {
+        call_back_buffer->ret = dict;
+    }
     call_back_buffer->count = 1;
     delete call_back_buffer->rowBuf;
     pthread_mutex_unlock(&call_back_buffer->mutex);
 
     hb_result_destroy(result);
     hb_get_destroy(get);
+
+    if (err == 0) {
+        return;
+    }
+
+    Py_XDECREF(dict);
+
+    return;
+/*
+error:
+    // TODO I could reuse this for happy path
+    // Actually no because of py_XDECREF(dict)
+    pthread_mutex_lock(&call_back_buffer->mutex);
+    call_back_buffer->err = err;
+    call_back_buffer->count = 1;
+    delete call_back_buffer->rowBuf;
+    pthread_mutex_unlock(&call_back_buffer->mutex);
+
+    // Destroying a NULL result/get shouldn't cause a bug
+    hb_result_destroy(result);
+    hb_get_destroy(get);
+
+    // TODO do I need to decref all the values this dict is holding on err?
+    Py_XDECREF(dict);
+
+    return;
+*/
 }
 /*
 import pychbase
@@ -1591,6 +1594,7 @@ static PyObject *Table_row(Table *self, PyObject *args) {
         pthread_mutex_unlock(&call_back_buffer->mutex);
         sleep(0.1);
     }
+    printf("after callback completed\n");
 
     ret = call_back_buffer->ret;
     err = call_back_buffer->err;
@@ -1598,6 +1602,7 @@ static PyObject *Table_row(Table *self, PyObject *args) {
     delete call_back_buffer;
 
     if (err != 0) {
+        printf("in table row after callback err is %i\n", err);
         if (err == 2) {
             PyErr_Format(PyExc_ValueError, "Row failed; probably a bad column family: %i", err);
         } else {
@@ -1606,12 +1611,19 @@ static PyObject *Table_row(Table *self, PyObject *args) {
         // TODO Don't i need to xdecref ret?
         return NULL;
     }
-
+    printf("we are returning now wtf\n");
     return ret;
 error:
+    printf("in table_row error lol\n");
     if (get) hb_get_destroy(get);
+    printf("in table_row error lol\n");
     if (row_buff) delete row_buff;
+    printf("in table_row error lol\n");
     if (call_back_buffer) delete call_back_buffer;
+    printf("in table_row error lol\n");
+    printf("in table_row error lol\n");
+    printf("in table_row error lol\n");
+    printf("in table_row error lol\n");
 
     return NULL;
 }
@@ -2688,6 +2700,7 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
     Py_ssize_t i;
     add_columns_type add_columns_to_delete = ADD_COLUMN_DELETE;
     uint64_t local_count = 0;
+    int errors;
 
     if (!PyArg_ParseTuple(args, "O!|O!", &PyList_Type, &actions, &PyBool_Type, &is_bufferable)) {
         return NULL;
@@ -2929,7 +2942,7 @@ inner_loop_error:
         }
     }
 
-    int errors = batch_call_back_buffer->errors;
+    errors = batch_call_back_buffer->errors;
 
     if (errors > 0) {
         // TODO I should really go through and get the results and give them back to user
