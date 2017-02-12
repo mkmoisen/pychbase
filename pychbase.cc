@@ -49,7 +49,7 @@
         }   \
     } while (0);
 
-#define CHECK_FORMAT_EXC(A, exc_type, format, __VA_ARGS__) \
+#define CHECK_FORMAT_EXC(A, exc_type, format, ...) \
     do {                \
         if (!(A)) {     \
             PyErr_Format(exc_type, format, __VA_ARGS__);    \
@@ -2058,7 +2058,7 @@ static PyObject *Table_put(Table *self, PyObject *args) {
         if (err == 2) {
             PyErr_Format(PyExc_ValueError, "Put failed; probably bad column family: %i", err);
         } else {
-            PyErr_Format(HBaseError, "Put Failed: %i");
+            PyErr_Format(HBaseError, "Put Failed due to unknown error: %i", err);
         }
 
         return NULL;
@@ -2277,6 +2277,8 @@ table.scan('hello', 'hello100~')
 */
 
 static PyObject *Table_scan(Table *self, PyObject *args) {
+    int err = 0;
+
     char *start = "";
     char *stop = "";
     PyObject *columns = NULL;
@@ -2285,6 +2287,14 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
     uint64_t timestamp_int = NULL;
     PyObject *include_timestamp = NULL;
     bool include_timestamp_bool = false;
+
+    hb_scanner_t scan = NULL;
+    RowBuffer *row_buf = NULL;
+    CallBackBuffer *call_back_buffer = NULL;
+
+    uint64_t local_count = 0;
+    add_columns_type add_columns_to_scan = ADD_COLUMN_SCAN;
+    PyObject *ret = NULL;
 
     if (!PyArg_ParseTuple(args, "|ssOOOO", &start, &stop, &columns, &filter, &timestamp, &include_timestamp)) {
         return NULL;
@@ -2312,48 +2322,26 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
         }
     }
 
-    int err = 0;
-
-    hb_scanner_t scan = NULL;
     err = hb_scanner_create(self->connection->client, &scan);
-    if (err != 0) {
-        PyErr_Format(HBaseError, "Failed to create the scanner: %i", err);
-        return NULL;
-    }
+    CHECK_FORMAT_EXC(err == 0, HBaseError, "Failed to create the scanner: %i", err);
 
     err = hb_scanner_set_table(scan, self->table_name, strlen(self->table_name));
-    if (err != 0) {
-        // TODO I should probably verify that nothing will go wrong in the event self->table_name is NULL
-        PyErr_Format(PyExc_ValueError, "Failed to set table '%s' on scanner: %i", self->table_name, err);
-        hb_scanner_destroy(scan, NULL, NULL);
-        return NULL;
-    }
+    CHECK_FORMAT_EXC(err == 0, HBaseError, "Failed to create the scanner: %i", err);
+    //CHECK_FORMAT_EXC(err == 0, PyExc_ValueError, "Failed to set table '%s' on scanner: %i", self->table_name, err);
 
     // TODO parameratize this
     err = hb_scanner_set_num_versions(scan, 1);
-    if (err != 0) {
-        PyErr_Format(HBaseError, "Failed to set num versions on scanner: %i", err);
-        hb_scanner_destroy(scan, NULL, NULL);
-        return NULL;
-    }
+    CHECK_FORMAT_EXC(err == 0, HBaseError, "Failed to set num versions on scanner: %i", err);
 
     if (strlen(start) > 0) {
         err = hb_scanner_set_start_row(scan, (byte_t *) start, strlen(start));
-        if (err != 0) {
-            // ValueError as I am assuming this is a user error in the row key value
-            PyErr_Format(PyExc_ValueError, "Failed to set start row on scanner: %i", err);
-            hb_scanner_destroy(scan, NULL, NULL);
-            return NULL;
-        }
+        // ValueError as I am assuming this is a user error in the row key value
+        CHECK_FORMAT_EXC(err == 0, PyExc_ValueError, "Failed to set start row '%s' on scanner: %i", start, err);
     }
     if (strlen(stop) > 1) {
         err = hb_scanner_set_end_row(scan, (byte_t *) stop, strlen(stop));
-        if (err != 0) {
-            // ValueError as I am assuming this is a user error in the row key value
-            PyErr_Format(PyExc_ValueError, "Failed to set stop row on scanner: %i", err);
-            hb_scanner_destroy(scan, NULL, NULL);
-            return NULL;
-        }
+        // ValueError as I am assuming this is a user error in the row key value
+        CHECK_FORMAT_EXC(err == 0, PyExc_ValueError, "Failed to set stop row '%s' on scanner: %i", stop, err);
     }
 
     // Does it optimize if I set this higher?
@@ -2363,79 +2351,31 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
      */
     // TODO Ok oddly in the sample code they use 1 or 3 for this value. Shouldn't I set it really high? or 0????
     err = hb_scanner_set_num_max_rows(scan, 1);
-    if (err != 0) {
-        PyErr_Format(HBaseError, "Failed to set num_max_rows scanner: %i", err);
-        hb_scanner_destroy(scan, NULL, NULL);
-        return NULL;
-    }
+    CHECK_FORMAT_EXC(err == 0, HBaseError, "Failed to set num_max_rows scanner: %i", err);
 
     if (timestamp_int) {
         err = hb_scanner_set_timerange(scan, NULL, timestamp_int + 1);
-        if (err != 0) {
-            PyErr_Format(PyExc_ValueError, "Could not set timestamp on scan: %i\n", err);
-            hb_scanner_destroy(scan, NULL, NULL);
-            return NULL;
-        }
+        CHECK_FORMAT_EXC(err == 0, PyExc_ValueError, "Could not set timestamp '%i' on scan: %i\n", timestamp_int, err);
     }
 
-    RowBuffer *row_buf = new RowBuffer();
-    if (!row_buf) {
-        // TODO do I need a call back here like on that segfault bug for admin_destroy
-        hb_scanner_destroy(scan, NULL, NULL);
-        return PyErr_NoMemory();
-    }
+    row_buf = new RowBuffer();
+    CHECK_MEM_EXC(row_buf);
 
-    CallBackBuffer *call_back_buffer = new CallBackBuffer(row_buf, NULL);
-    if (!call_back_buffer) {
-        delete row_buf;
-        hb_scanner_destroy(scan, NULL, NULL);
-        return PyErr_NoMemory();
-    }
+    call_back_buffer = new CallBackBuffer(row_buf, NULL);
+    CHECK_MEM_EXC(call_back_buffer);
 
     call_back_buffer->include_timestamp = include_timestamp_bool;
 
     call_back_buffer->ret = PyList_New(0);
-    if (!call_back_buffer->ret) {
-        hb_scanner_destroy(scan, NULL, NULL);
-        delete row_buf;
-        delete call_back_buffer;
-        return PyErr_NoMemory();
-    }
+    CHECK_MEM_EXC(call_back_buffer->ret);
 
-    add_columns_type add_columns_t = ADD_COLUMN_SCAN;
-    err = row_add_columns(columns, &scan, row_buf, add_columns_t, NULL);
-    // TODO could this be a macro?
-    if (err != 0) {
-        hb_scanner_destroy(scan, NULL, NULL);
-        delete row_buf;
-        delete call_back_buffer;
-        if (err == 13) {
-            return PyErr_NoMemory();
-        }
-        if (err == -2) {
-            PyErr_SetString(PyExc_TypeError, "columns must be list-like object\n");
-        } else if (err == -3) {
-            PyErr_SetString(PyExc_TypeError, "columns must be a list-like object, not a string\n");
-        } else if (err == -10) {
-            PyErr_SetString(HBaseError, "pychbase has a severe bug for row_add_columns method; bad type\n");
-        } else {
-            // hb_get_add_column failed, probably a bug in pychbase code or libhbase
-            PyErr_Format(HBaseError, "Failed to add column to get: %i\n", err);
-        }
-        return NULL;
-    }
+    err = row_add_columns(columns, &scan, row_buf, add_columns_to_scan, NULL);
+    CHECK_ROW_ADD_COLUMNS(err);
 
     // The only time this returns non zero is if it cannot get the JNI, and callback is guaranteed not to execute
     err = hb_scanner_next(scan, scan_callback, call_back_buffer);
-    if (err != 0) {
-        PyErr_Format(HBaseError, "Scan failed: %i", err);
-        hb_scanner_destroy(scan, NULL, NULL);
-        delete row_buf;
-        delete call_back_buffer;
-        return NULL;
-    }
+    CHECK_FORMAT_EXC(err == 0, HBaseError, "Scan failed due to unknown error: %i", err);
 
-    uint64_t local_count = 0;
     while (local_count != 1) {
         pthread_mutex_lock(&call_back_buffer->mutex);
         local_count = call_back_buffer->count;
@@ -2443,7 +2383,7 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
         sleep(0.1);
     }
 
-    PyObject *ret = call_back_buffer->ret;
+    ret = call_back_buffer->ret;
     err = call_back_buffer->err;
 
     delete call_back_buffer;
@@ -2459,6 +2399,13 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
     }
 
     return ret;
+
+error:
+    if (row_buf) delete row_buf;
+    if (call_back_buffer) delete call_back_buffer;
+    // TODO do I need a call back here like on that segfault bug for admin_destroy
+    if (scan) hb_scanner_destroy(scan, NULL, NULL);
+    return NULL;
 }
 
 /*
