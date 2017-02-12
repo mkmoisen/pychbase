@@ -1329,6 +1329,7 @@ static int row_add_columns(PyObject *columns, void *get, RowBuffer *row_buff, ad
     return err;
 }
 
+/*
 static PyObject *Table_row(Table *self, PyObject *args) {
     char *row_key;
     PyObject *columns = NULL;
@@ -1419,6 +1420,7 @@ static PyObject *Table_row(Table *self, PyObject *args) {
     if (err != 0) {
         hb_get_destroy(get);
         delete row_buff;
+        delete call_back_buffer;
         if (err == 13) {
             return PyErr_NoMemory();
         }
@@ -1469,6 +1471,158 @@ static PyObject *Table_row(Table *self, PyObject *args) {
     }
 
     return ret;
+}
+*/
+
+
+#define CHECK_FORMAT_EXC(A, exc_type, format, __VA_ARGS__) \
+    do {                \
+        if (!(A)) {     \
+            PyErr_Format(exc_type, format, __VA_ARGS__);    \
+            goto error; \
+        }   \
+    } while (0);
+
+#define CHECK_SET_EXC(A, exc_type, statement) \
+    do {                \
+        if (!(A)) {     \
+            PyErr_SetString(exc_type, statement);    \
+            goto error; \
+        }   \
+    } while (0);
+
+#define CHECK_MEM_EXC(A) \
+    do {    \
+        if (!(A)) { \
+            PyErr_SetNone(PyExc_MemoryError);   \
+        }   \
+    } while (0);
+
+#define CHECK_ROW_ADD_COLUMNS(err) \
+    do {                            \
+        if ((err) != 0) {             \
+            if (err == 13) {        \
+                PyErr_SetNone(PyExc_MemoryError);           \
+            } else if (err == -2) {                         \
+                PyErr_SetString(PyExc_TypeError, "columns must be list-like object\n"); \
+            } else if (err == -3) { \
+                PyErr_SetString(PyExc_TypeError, "columns must be a list-like object, not a string\n"); \
+            } else if (err == -10) {    \
+                PyErr_SetString(HBaseError, "pychbase has a severe bug for row_add_columns method; bad type\n");    \
+            } else {    \
+                PyErr_Format(HBaseError, "Failed to add column to get due to unknown error: %i\n", err);    \
+            }   \
+            goto error; \
+        }   \
+    } while (0);
+
+static PyObject *Table_row(Table *self, PyObject *args) {
+    int err = 0;
+
+    char *row_key;
+    PyObject *columns = NULL;
+    PyObject *timestamp = NULL;
+    uint64_t timestamp_int = NULL;
+    PyObject *include_timestamp = NULL;
+    bool include_timestamp_bool = false;
+
+    hb_get_t get = NULL;
+    RowBuffer *row_buff = NULL;
+    CallBackBuffer *call_back_buffer = NULL;
+
+    add_columns_type add_columns_to_get = ADD_COLUMN_GET;
+    uint64_t local_count = 0;
+    PyObject *ret = NULL;
+
+    // Todo type check
+    if (!PyArg_ParseTuple(args, "s|OOO", &row_key, &columns, &timestamp, &include_timestamp)) {
+        return NULL;
+    }
+
+    if (!self->connection->is_open) {
+        Connection_open(self->connection);
+    }
+
+
+    if (timestamp) {
+        if (timestamp != Py_None) {
+            // was seg faulting i think before timestamp != Py_None check
+            CHECK_SET_EXC(PyInt_Check(timestamp), PyExc_TypeError, "Timestamp must be int\n");
+
+            timestamp_int = (uint64_t) PyInt_AsSsize_t(timestamp);
+        }
+    }
+
+    if (include_timestamp) {
+        if (include_timestamp != Py_None) {
+            CHECK_SET_EXC(PyObject_TypeCheck(include_timestamp, &PyBool_Type), PyExc_TypeError, "include_timestamp must be boolean\n");
+
+            if (PyObject_IsTrue(include_timestamp)) {
+                include_timestamp_bool = true;
+            }
+        }
+
+    }
+
+    err = hb_get_create((const byte_t *)row_key, strlen(row_key), &get);
+    CHECK_FORMAT_EXC(err == 0, HBaseError, "Could not create get with row key '%s'\n", row_key)
+    //OOM_OBJ_RETURN_NULL(get); TODO replace
+
+    err = hb_get_set_table(get, self->table_name, strlen(self->table_name));
+    CHECK_FORMAT_EXC(err == 0, PyExc_ValueError, "Could not set table name '%s' on get\n", self->table_name);
+
+    if (timestamp_int) {
+        // happybase is inclusive, libhbasec is exclusive
+        // TODO submit patch for exclusive in documentation
+        err = hb_get_set_timerange(get, NULL, timestamp_int + 1);
+        CHECK_FORMAT_EXC(err == 0, PyExc_ValueError, "Could not set timestamp on get: %i\n", err);
+    }
+
+    row_buff = new RowBuffer();
+    CHECK_MEM_EXC(row_buff);
+
+    call_back_buffer = new CallBackBuffer(row_buff, NULL);
+    CHECK_MEM_EXC(call_back_buffer);
+
+    call_back_buffer->include_timestamp = include_timestamp_bool;
+
+    err = row_add_columns(columns, &get, row_buff, add_columns_to_get, NULL);
+    CHECK_ROW_ADD_COLUMNS(err);
+
+    // If err is nonzero, the callback is guarenteed to not have been invoked
+    err = hb_get_send(self->connection->client, get, row_callback, call_back_buffer);
+    CHECK_FORMAT_EXC(err == 0, HBaseError, "Could not send get: %i", err);
+
+
+    while (local_count != 1) {
+        pthread_mutex_lock(&call_back_buffer->mutex);
+        local_count = call_back_buffer->count;
+        pthread_mutex_unlock(&call_back_buffer->mutex);
+        sleep(0.1);
+    }
+
+    ret = call_back_buffer->ret;
+    err = call_back_buffer->err;
+
+    delete call_back_buffer;
+
+    if (err != 0) {
+        if (err == 2) {
+            PyErr_Format(PyExc_ValueError, "Row failed; probably a bad column family: %i", err);
+        } else {
+            PyErr_Format(HBaseError, "Get failed with unknown error: %i", err);
+        }
+        // TODO Don't i need to xdecref ret?
+        return NULL;
+    }
+
+    return ret;
+error:
+    if (get) hb_get_destroy(get);
+    if (row_buff) delete row_buff;
+    if (call_back_buffer) delete call_back_buffer;
+
+    return NULL;
 }
 
 
