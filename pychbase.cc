@@ -1362,154 +1362,6 @@ static int row_add_columns(PyObject *columns, void *get, RowBuffer *row_buff, ad
     } while (0);
 
 
-/*
-static PyObject *Table_row(Table *self, PyObject *args) {
-    char *row_key;
-    PyObject *columns = NULL;
-    PyObject *timestamp = NULL;
-    uint64_t timestamp_int = NULL;
-    PyObject *include_timestamp = NULL;
-    bool include_timestamp_bool = false;
-
-    // Todo type check
-    if (!PyArg_ParseTuple(args, "s|OOO", &row_key, &columns, &timestamp, &include_timestamp)) {
-        return NULL;
-    }
-
-    if (!self->connection->is_open) {
-        Connection_open(self->connection);
-    }
-
-
-
-    if (timestamp) {
-        if (timestamp != Py_None) {
-            // was seg faulting i think before timestamp != Py_None check
-            if (!PyInt_Check(timestamp)) {
-                PyErr_SetString(PyExc_TypeError, "Timestamp must be int\n");
-                return NULL;
-            }
-            timestamp_int = (uint64_t) PyInt_AsSsize_t(timestamp);
-        }
-    }
-
-    if (include_timestamp) {
-        if (include_timestamp != Py_None) {
-            if (!PyObject_TypeCheck(include_timestamp, &PyBool_Type)) {
-                PyErr_SetString(PyExc_TypeError, "include_timestamp must be boolean\n");
-                return NULL;
-            }
-            if (PyObject_IsTrue(include_timestamp)) {
-                include_timestamp_bool = true;
-            }
-        }
-
-    }
-
-    int err = 0;
-
-    hb_get_t get = NULL;
-    err = hb_get_create((const byte_t *)row_key, strlen(row_key), &get);
-    if (err != 0) {
-        PyErr_Format(HBaseError, "Could not create get with row key '%s'\n", row_key);
-        return NULL;
-    }
-    OOM_OBJ_RETURN_NULL(get);
-
-    err = hb_get_set_table(get, self->table_name, strlen(self->table_name));
-    if (err != 0) {
-        PyErr_Format(PyExc_ValueError, "Could not set table name '%s' on get\n", self->table_name);
-        hb_get_destroy(get);
-        return NULL;
-    }
-
-    if (timestamp_int) {
-        // happybase is inclusive, libhbasec is exclusive
-        // TODO submit patch for exclusive in documentation
-        err = hb_get_set_timerange(get, NULL, timestamp_int + 1);
-        if (err != 0) {
-            PyErr_Format(PyExc_ValueError, "Could not set timestamp on get: %i\n", err);
-            hb_get_destroy(get);
-            return NULL;
-        }
-    }
-
-    RowBuffer *row_buff = new RowBuffer();
-    if (!row_buff) {
-         hb_get_destroy(get);
-         return PyErr_NoMemory();
-    }
-
-    CallBackBuffer *call_back_buffer = new CallBackBuffer(row_buff, NULL);
-    if (!call_back_buffer) {
-        hb_get_destroy(get);
-        delete row_buff;
-        return PyErr_NoMemory();
-    }
-
-    call_back_buffer->include_timestamp = include_timestamp_bool;
-    add_columns_type add_columns_t = ADD_COLUMN_GET;
-    err = row_add_columns(columns, &get, row_buff, add_columns_t, NULL);
-    if (err != 0) {
-        hb_get_destroy(get);
-        delete row_buff;
-        delete call_back_buffer;
-        if (err == 13) {
-            return PyErr_NoMemory();
-        }
-        if (err == -2) {
-            PyErr_SetString(PyExc_TypeError, "columns must be list-like object\n");
-        } else if (err == -3) {
-            PyErr_SetString(PyExc_TypeError, "columns must be a list-like object, not a string\n");
-        } else if (err == -10) {
-            PyErr_SetString(HBaseError, "pychbase has a severe bug for row_add_columns method; bad type\n");
-        } else {
-            // hb_get_add_column failed, probably a bug in pychbase code or libhbase
-            PyErr_Format(HBaseError, "Failed to add column to get: %i\n", err);
-        }
-        return NULL;
-    }
-
-    // If err is nonzero, the callback is guarenteed to not have been invoked
-    err = hb_get_send(self->connection->client, get, row_callback, call_back_buffer);
-    if (err != 0) {
-        hb_get_destroy(get);
-        delete row_buff;
-        delete call_back_buffer;
-        PyErr_Format(HBaseError, "Could not send get: %i", err);
-        return NULL;
-    }
-
-    uint64_t local_count = 0;
-    while (local_count != 1) {
-        pthread_mutex_lock(&call_back_buffer->mutex);
-        local_count = call_back_buffer->count;
-        pthread_mutex_unlock(&call_back_buffer->mutex);
-        sleep(0.1);
-    }
-
-    PyObject *ret = call_back_buffer->ret;
-    err = call_back_buffer->err;
-
-    delete call_back_buffer;
-
-    if (err != 0) {
-        if (err == 2) {
-            PyErr_Format(PyExc_ValueError, "Row failed; probably a bad column family: %i", err);
-        } else {
-            PyErr_Format(HBaseError, "Get failed with unknown error: %i", err);
-        }
-        // TODO Don't i need to xdecref ret?
-        return NULL;
-    }
-
-    return ret;
-}
-*/
-
-
-
-
 static PyObject *Table_row(Table *self, PyObject *args) {
     int err = 0;
 
@@ -1594,7 +1446,6 @@ static PyObject *Table_row(Table *self, PyObject *args) {
         pthread_mutex_unlock(&call_back_buffer->mutex);
         sleep(0.1);
     }
-    printf("after callback completed\n");
 
     ret = call_back_buffer->ret;
     err = call_back_buffer->err;
@@ -1602,7 +1453,6 @@ static PyObject *Table_row(Table *self, PyObject *args) {
     delete call_back_buffer;
 
     if (err != 0) {
-        printf("in table row after callback err is %i\n", err);
         if (err == 2) {
             PyErr_Format(PyExc_ValueError, "Row failed; probably a bad column family: %i", err);
         } else {
@@ -1611,19 +1461,11 @@ static PyObject *Table_row(Table *self, PyObject *args) {
         // TODO Don't i need to xdecref ret?
         return NULL;
     }
-    printf("we are returning now wtf\n");
     return ret;
 error:
-    printf("in table_row error lol\n");
     if (get) hb_get_destroy(get);
-    printf("in table_row error lol\n");
     if (row_buff) delete row_buff;
-    printf("in table_row error lol\n");
     if (call_back_buffer) delete call_back_buffer;
-    printf("in table_row error lol\n");
-    printf("in table_row error lol\n");
-    printf("in table_row error lol\n");
-    printf("in table_row error lol\n");
 
     return NULL;
 }
