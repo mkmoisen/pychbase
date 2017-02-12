@@ -49,6 +49,30 @@
         }   \
     } while (0);
 
+#define CHECK_FORMAT_EXC(A, exc_type, format, __VA_ARGS__) \
+    do {                \
+        if (!(A)) {     \
+            PyErr_Format(exc_type, format, __VA_ARGS__);    \
+            goto error; \
+        }   \
+    } while (0);
+
+#define CHECK_SET_EXC(A, exc_type, statement) \
+    do {                \
+        if (!(A)) {     \
+            PyErr_SetString(exc_type, statement);    \
+            goto error; \
+        }   \
+    } while (0);
+
+#define CHECK_MEM_EXC(A) \
+    do {    \
+        if (!(A)) { \
+            PyErr_SetNone(PyExc_MemoryError);   \
+        }   \
+    } while (0);
+
+
 static PyObject *SpamError;
 static PyObject *HBaseError;
 
@@ -1329,6 +1353,25 @@ static int row_add_columns(PyObject *columns, void *get, RowBuffer *row_buff, ad
     return err;
 }
 
+#define CHECK_ROW_ADD_COLUMNS(err) \
+    do {                            \
+        if ((err) != 0) {             \
+            if (err == 13) {        \
+                PyErr_SetNone(PyExc_MemoryError);           \
+            } else if (err == -2) {                         \
+                PyErr_SetString(PyExc_TypeError, "columns must be list-like object\n"); \
+            } else if (err == -3) { \
+                PyErr_SetString(PyExc_TypeError, "columns must be a list-like object, not a string\n"); \
+            } else if (err == -10) {    \
+                PyErr_SetString(HBaseError, "pychbase has a severe bug for row_add_columns method; bad type\n");    \
+            } else {    \
+                PyErr_Format(HBaseError, "Failed to add column to get due to unknown error: %i\n", err);    \
+            }   \
+            goto error; \
+        }   \
+    } while (0);
+
+
 /*
 static PyObject *Table_row(Table *self, PyObject *args) {
     char *row_key;
@@ -1475,46 +1518,7 @@ static PyObject *Table_row(Table *self, PyObject *args) {
 */
 
 
-#define CHECK_FORMAT_EXC(A, exc_type, format, __VA_ARGS__) \
-    do {                \
-        if (!(A)) {     \
-            PyErr_Format(exc_type, format, __VA_ARGS__);    \
-            goto error; \
-        }   \
-    } while (0);
 
-#define CHECK_SET_EXC(A, exc_type, statement) \
-    do {                \
-        if (!(A)) {     \
-            PyErr_SetString(exc_type, statement);    \
-            goto error; \
-        }   \
-    } while (0);
-
-#define CHECK_MEM_EXC(A) \
-    do {    \
-        if (!(A)) { \
-            PyErr_SetNone(PyExc_MemoryError);   \
-        }   \
-    } while (0);
-
-#define CHECK_ROW_ADD_COLUMNS(err) \
-    do {                            \
-        if ((err) != 0) {             \
-            if (err == 13) {        \
-                PyErr_SetNone(PyExc_MemoryError);           \
-            } else if (err == -2) {                         \
-                PyErr_SetString(PyExc_TypeError, "columns must be list-like object\n"); \
-            } else if (err == -3) { \
-                PyErr_SetString(PyExc_TypeError, "columns must be a list-like object, not a string\n"); \
-            } else if (err == -10) {    \
-                PyErr_SetString(HBaseError, "pychbase has a severe bug for row_add_columns method; bad type\n");    \
-            } else {    \
-                PyErr_Format(HBaseError, "Failed to add column to get due to unknown error: %i\n", err);    \
-            }   \
-            goto error; \
-        }   \
-    } while (0);
 
 static PyObject *Table_row(Table *self, PyObject *args) {
     int err = 0;
@@ -1908,12 +1912,20 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
 }
 
 static PyObject *Table_put(Table *self, PyObject *args) {
+    int err = 0;
+
     char *row_key;
     PyObject *dict;
     PyObject *timestamp = NULL;
     uint64_t timestamp_int = NULL;
     PyObject *is_wal = NULL;
     bool is_wal_bool = true;
+
+    RowBuffer *row_buf = NULL;
+    CallBackBuffer *call_back_buffer = NULL;
+    hb_put_t hb_put = NULL; // This must be initialized to NULL or else hb_mutation_destroy could fail
+
+    uint64_t local_count = 0;
 
     if (!PyArg_ParseTuple(args, "sO!|OO", &row_key, &PyDict_Type, &dict, &timestamp, &is_wal)) {
         return NULL;
@@ -1943,25 +1955,18 @@ static PyObject *Table_put(Table *self, PyObject *args) {
 
     }
 
-    int err = 0;
+    row_buf = new RowBuffer();
+    CHECK_MEM_EXC(row_buf);
 
-    RowBuffer *row_buf = new RowBuffer();
-    OOM_OBJ_RETURN_NULL(row_buf);
+    call_back_buffer = new CallBackBuffer(row_buf, NULL);
+    CHECK_MEM_EXC(call_back_buffer)
 
-    CallBackBuffer *call_back_buffer = new CallBackBuffer(row_buf, NULL);
-    if (!call_back_buffer) {
-        delete row_buf;
-        return PyErr_NoMemory();
-    }
-
-    hb_put_t hb_put = NULL; // This must be initialized to NULL or else hb_mutation_destroy could fail
-
+    // TODO make macro for make_put check ?
+    // Well I only use it here...
     err = make_put(self, row_buf, row_key, dict, &hb_put, false, timestamp_int, is_wal_bool);
     if (err != 0) {
-        delete row_buf;
-        delete call_back_buffer;
         // Its OK if hb_put is NULL
-        hb_mutation_destroy((hb_mutation_t) hb_put);
+
         // TODO A cool feature would be to let the user specify column families at connection.table() time (since the API doesn't let me figure it out)
         // I could then validate it in a batched put before sending it to hbase
         if (err == -10) {
@@ -1990,13 +1995,9 @@ static PyObject *Table_put(Table *self, PyObject *args) {
             // Hmm would it still be user error at this point?
             PyErr_Format(PyExc_ValueError, "Failed to make put: %i", err);
         }
-        return NULL;
+        goto error;
     }
-    if (!hb_put) {
-        delete row_buf;
-        delete call_back_buffer;
-        return PyErr_NoMemory();
-    }
+    CHECK_MEM_EXC(hb_put);
 
     // https://github.com/mapr/libhbase/blob/0ddda015113452955ed600116f58a47eebe3b24a/src/main/native/jni_impl/hbase_client.cc#L151
     // https://github.com/mapr/libhbase/blob/0ddda015113452955ed600116f58a47eebe3b24a/src/main/native/jni_impl/hbase_client.cc#L151
@@ -2012,13 +2013,7 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     //
     // Ya so if err is not 0, call back has not been invoked, and its safe/necessary to delete row_buf
     err = hb_mutation_send(self->connection->client, (hb_mutation_t)hb_put, put_callback, call_back_buffer);
-    if (err != 0) {
-        delete row_buf;
-        delete call_back_buffer;
-        hb_mutation_destroy((hb_mutation_t) hb_put);
-        PyErr_Format(HBaseError, "Put failed to send: %i", err);
-        return NULL;
-    }
+    CHECK_FORMAT_EXC(err == 0, HBaseError, "Put failed to send: %i", err);
 
     /*
     If client is null, flush will still invoke the callback and set the errno in call back
@@ -2035,6 +2030,9 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     If I set buffering on or not, it still ends up being sent before the flush?
     */
     err = hb_client_flush(self->connection->client, client_flush_callback, NULL);
+    // callback will have deleted the row buf and mutation
+    //CHECK_FORMAT_EXC(err == 0, HBaseError, "Put failed to flush: %i", err);
+    // Note how I'm not using the macro since I don't want to jump to err and double delete the row buf...
     if (err != 0) {
         // callback will have deleted the row buf and mutation
         delete call_back_buffer;
@@ -2044,7 +2042,7 @@ static PyObject *Table_put(Table *self, PyObject *args) {
 
 
     // Earlier I was doing this without a lock and it caused a seg fault. I'm not sure why though but this fixed it.
-    uint64_t local_count = 0;
+
     while (local_count != 1) {
         pthread_mutex_lock(&call_back_buffer->mutex);
         local_count = call_back_buffer->count;
@@ -2067,6 +2065,13 @@ static PyObject *Table_put(Table *self, PyObject *args) {
     }
 
     Py_RETURN_NONE;
+
+error:
+    if (row_buf) delete row_buf;
+    if (call_back_buffer) delete call_back_buffer;
+    if (hb_put) hb_mutation_destroy((hb_mutation_t) hb_put);
+
+    return NULL;
 }
 
 /*
@@ -2563,12 +2568,21 @@ static int make_delete(Table *self, char *row_key, hb_delete_t *hb_delete, uint6
 }
 
 static PyObject *Table_delete(Table *self, PyObject *args) {
+    int err = 0;
+
     char *row_key;
     PyObject *timestamp = NULL;
     PyObject *columns = NULL;
     uint64_t timestamp_int = NULL;
     PyObject *is_wal = NULL;
     bool is_wal_bool = true;
+
+    hb_delete_t hb_delete = NULL;
+    RowBuffer *row_buf = NULL;
+    CallBackBuffer *call_back_buffer = NULL;
+
+    add_columns_type add_columns_to_delete = ADD_COLUMN_DELETE;
+    uint64_t local_count = 0;
 
     if (!PyArg_ParseTuple(args, "s|OOO", &row_key, &columns, &timestamp, &is_wal)) {
         return NULL;
@@ -2599,68 +2613,36 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
         }
     }
 
-    int err = 0;
-
     // TODO Do I need to check to see if hb_delete is null inside of the make_delete function?
-    hb_delete_t hb_delete = NULL;
+
+    // TODO make macro for make_delete? But I only use it like this here...
     err = make_delete(self, row_key, &hb_delete, timestamp_int, is_wal_bool);
     OOM_ERRNO_RETURN_NULL(err);
     if (err != 0) {
-        hb_mutation_destroy((hb_mutation_t) hb_delete);
+        //hb_mutation_destroy((hb_mutation_t) hb_delete);
         if (err == -5) {
             PyErr_SetString(PyExc_ValueError, "row_key was empty string");
         } else {
             PyErr_Format(PyExc_ValueError, "Failed to create Delete with rowkey '%s' or set it's Table with '%s': %i", row_key, self->table_name, err);
         }
-        return NULL;
+        goto error;
     }
 
     // I'm not even using the row_buf for deletes
-    RowBuffer *row_buf = new RowBuffer();
-    if (!row_buf) {
-        hb_mutation_destroy((hb_mutation_t) hb_delete);
-        return PyErr_NoMemory();
-    }
+    row_buf = new RowBuffer();
+    CHECK_MEM_EXC(row_buf);
 
-    CallBackBuffer *call_back_buffer = new CallBackBuffer(row_buf, NULL);
-    if (!call_back_buffer) {
-        hb_mutation_destroy((hb_mutation_t) hb_delete);
-        delete row_buf;
-        return PyErr_NoMemory();
-    }
+    call_back_buffer = new CallBackBuffer(row_buf, NULL);
+    CHECK_MEM_EXC(call_back_buffer);
 
-    add_columns_type add_columns_t = ADD_COLUMN_DELETE;
-    err = row_add_columns(columns, &hb_delete, row_buf, add_columns_t, timestamp_int);
-    if (err != 0) {
-        hb_mutation_destroy((hb_mutation_t) hb_delete);
-        delete row_buf;
-        delete call_back_buffer;
-        if (err == 13) {
-            return PyErr_NoMemory();
-        }
-        if (err == -2) {
-            PyErr_SetString(PyExc_TypeError, "columns must be list-like object\n");
-        } else if (err == -3) {
-            PyErr_SetString(PyExc_TypeError, "columns must be a list-like object, not a string\n");
-        } else if (err == -10) {
-            PyErr_SetString(HBaseError, "pychbase has a severe bug for row_add_columns method; bad type\n");
-        } else {
-            // hb_get_add_column failed, probably a bug in pychbase code or libhbase
-            PyErr_Format(HBaseError, "Failed to add column to get: %i\n", err);
-        }
-        return NULL;
-    }
+    err = row_add_columns(columns, &hb_delete, row_buf, add_columns_to_delete, timestamp_int);
+    CHECK_ROW_ADD_COLUMNS(err);
 
     // If err is not 0, callback has not been invoked
     err = hb_mutation_send(self->connection->client, (hb_mutation_t)hb_delete, delete_callback, call_back_buffer);
-    if (err != 0) {
-        hb_mutation_destroy((hb_mutation_t) hb_delete);
-        delete row_buf;
-        delete call_back_buffer;
-        PyErr_Format(HBaseError, "Delete failed to send and may not have succeeded: %i", err);
-        return NULL;
-    }
+    CHECK_FORMAT_EXC(err == 0, HBaseError, "Delete failed to send due to unknown error: %i", err);
 
+    // Notice how I don't use the macro to jump to err so I don't double delete the row buff
     err = hb_client_flush(self->connection->client, client_flush_callback, NULL);
     if (err != 0) {
         delete call_back_buffer;
@@ -2668,7 +2650,6 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
         return NULL;
     }
 
-    uint64_t local_count = 0;
     while (local_count != 1) {
         pthread_mutex_lock(&call_back_buffer->mutex);
         local_count = call_back_buffer->count;
@@ -2690,6 +2671,13 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
     }
 
     Py_RETURN_NONE;
+
+error:
+    if (row_buf) delete row_buf;
+    if (call_back_buffer) delete call_back_buffer;
+    if (hb_delete) hb_mutation_destroy((hb_mutation_t) hb_delete);
+
+    return NULL;
 }
 
 
