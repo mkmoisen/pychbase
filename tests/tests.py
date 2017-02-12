@@ -3,7 +3,7 @@ from pychbase._pychbase import _connection, _table
 from pychbase import Connection, Table, Batch
 from StringIO import StringIO
 from config import ZOOKEEPERS, TABLE_NAME
-
+from datetime import datetime
 
 class TestCConnection(unittest.TestCase):
     def test_bad_cldbs(self):
@@ -200,6 +200,59 @@ class TestCTableRow(unittest.TestCase):
         row = self.table.row('foo', None, None, True)
         row = self.table.row('foo', None, None, False)
         self.assertRaises(TypeError, self.table.row, 'foo', None, None, 'invalid')
+
+
+class TestCTableRowColumns(unittest.TestCase):
+    def setUp(self):
+        self.connection = _connection(ZOOKEEPERS)
+
+
+    def tearDown(self):
+        try:
+            self.connection.delete_table(TABLE_NAME)
+        except ValueError:
+            pass
+        self.connection.close()
+
+    def test_happy(self):
+        self.connection.create_table(TABLE_NAME, {'f': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+        self.table.put("foo", {"f:a": "foo", 'f:ab': 'bar', 'f:abc': 'baz'})
+        row = self.table.row('foo')
+        self.assertEquals(row, {"f:a": "foo", 'f:ab': 'bar', 'f:abc': 'baz'})
+        row = self.table.row('foo', ('f',))
+        self.assertEquals(row, {"f:a": "foo", 'f:ab': 'bar', 'f:abc': 'baz'})
+        row = self.table.row('foo', ('f:',))
+        self.assertEquals(row, {"f:a": "foo", 'f:ab': 'bar', 'f:abc': 'baz'})
+
+        row = self.table.row('foo', ('f:a',))
+        self.assertEquals(row, {"f:a": "foo"})
+
+        row = self.table.row('foo', ('f:a', 'f:ab'))
+        self.assertEquals(row, {"f:a": "foo", 'f:ab': 'bar'})
+
+        row = self.table.row('foo', ('f:a', 'f:ab', 'f:abc'))
+        self.assertEquals(row, {"f:a": "foo", 'f:ab': 'bar', 'f:abc': 'baz'})
+
+        row = self.table.row('foo', ('f:nope',))
+        self.assertEquals(row, {})
+
+        # Hm, should I return an empty string if 'f:nope' doesn't exist?
+        row = self.table.row('foo', ('f:a', 'f:nope'))
+        self.assertEquals(row, {"f:a": "foo"})
+
+    def test_type(self):
+        self.connection.create_table(TABLE_NAME, {'f': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+        self.assertRaises(TypeError, self.table.row, 'foo', 'bar')
+        self.assertRaises(TypeError, self.table.row, 'foo', {'set', 'should', 'fail'})
+        self.assertRaises(TypeError, self.table.row, 'foo', {'dict': 'should', 'also': 'fail'})
+
+    def test_bad_column_family(self):
+        self.connection.create_table(TABLE_NAME, {'f': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+        self.assertRaises(ValueError, self.table.row, 'foo', ('b',))
+
 
 
 class TestCTablePut(unittest.TestCase):
@@ -1104,4 +1157,7 @@ class TestPythonRowPrefix(unittest.TestCase):
 
 
 if __name__ == '__main__':
+    s = datetime.now()
     unittest.main()
+    e = datetime.now()
+    print("Tests took %s" % (e - s))

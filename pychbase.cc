@@ -355,6 +355,98 @@ static char *hbase_fqcolumn(const hb_cell_t *cell) {
     return fq;
 }
 
+/*
+import pychbase
+connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
+connection.open()
+
+table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
+table.put("snoop", {"f:foo": "bar"})
+*/
+// TODO change this name of this function
+/*
+* Given a fully qualified column, e.g. "f:foo", split it into its family and qualifier "f" and "foo" respectively
+* Caller should allocate memory for family and qualifier, and then free them later
+* Returns 0 on success
+* Returns 12 if given fq was null
+* Returns -10 if no colon ':' was found in the string
+*/
+static int split(char *fq, char *family, char *qualifier) {
+    OOM_OBJ_RETURN_ERRNO(fq);
+
+    int i = 0;
+    // Initialize family to length, + 1 for null pointer, - 1 for the colon
+    bool found_colon = false;
+
+    // this should either be strlen(fq) - 1, or strlen(fq) without the fq[i] != '\0' right?
+    for (i = 0; i < strlen(fq) && fq[i] != '\0'; i++) {
+        if (fq[i] != ':') {
+            family[i] = fq[i];
+        } else {
+            found_colon = true;
+            break;
+        }
+    }
+
+    if (!found_colon) {
+        return -10;
+    }
+
+    family[i] = '\0';
+
+    // This works with strlen(..) + 1 or without + 1 ... why ??
+    int qualifier_index = 0;
+    for (i=i + 1; i < strlen(fq) && fq[i] != '\0'; i++) {
+        qualifier[qualifier_index] = fq[i];
+        qualifier_index += 1;
+    }
+    qualifier[qualifier_index] = '\0';
+
+    return 0;
+
+}
+
+/*
+* Similar to split, but used for `columns` arg to Table_row or Table_delete.
+* If fq doesn't have a colon, or has a colon but no more values, qualifier will be freed and set to NULL
+* family needs to be strlen() + 1 for null terminator ! Note how this is different than split
+*/
+// TODO turn this into a private function and add to unit tests
+static int split_columns(char *fq, char *family, char *qualifier) {
+    OOM_OBJ_RETURN_ERRNO(fq);
+
+    int i = 0;
+    // Initialize family to length, + 1 for null pointer, - 1 for the colon
+    bool found_colon = false;
+
+    // this should either be strlen(fq) - 1, or strlen(fq) without the fq[i] != '\0' right?
+    for (i = 0; i < strlen(fq) && fq[i] != '\0'; i++) {
+        if (fq[i] != ':') {
+            family[i] = fq[i];
+        } else {
+            found_colon = true;
+            break;
+        }
+    }
+
+    family[i] = '\0';
+
+    if (!found_colon) {
+        qualifier[0] = '\0';
+        return 0;
+    }
+
+    // This works with strlen(..) + 1 or without + 1 ... why ??
+    int qualifier_index = 0;
+    for (i=i + 1; i < strlen(fq) && fq[i] != '\0'; i++) {
+        qualifier[qualifier_index] = fq[i];
+        qualifier_index += 1;
+    }
+    qualifier[qualifier_index] = '\0';
+
+    return 0;
+}
+
 
 /*
 * libhbase uses asyncronous threads. The data that will be sent to HBase must remain in memory until
@@ -1145,9 +1237,101 @@ while True:
     table.row('hello')
 */
 
+
+typedef enum {ADD_COLUMN_GET, ADD_COLUMN_SCAN, ADD_COLUMN_DELETE} add_columns_type;
+/*
+* Used in Table_row to add columns to a get.
+* Type: 1 = get, 2 = scanner, 3 = delete
+* Returns 12 if OOM
+* Returns -2 it columns is not iterable
+* Returns -3 if columns is a string
+* Split columns may return 12 for OOM
+* Returns -10 if type was not 1, 2, 3
+* Any other error means hb_get_add_column failed
+*
+*/
+//static int row_add_columns(PyObject *columns, hb_get_t *get, RowBuffer *row_buff) {
+static int row_add_columns(PyObject *columns, void *get, RowBuffer *row_buff, add_columns_type type, int64_t timestamp) {
+    int err = 0;
+
+    if (columns) {
+        if (columns != Py_None) {
+             // TODO there must be a check for list-like non-string
+             if (!PySequence_Check(columns)) {
+                return -2;
+             }
+             // TODO ADD TEST FOR THIS
+             if (PyObject_TypeCheck(columns, &PyBaseString_Type)) {
+                return -3;
+             }
+
+             Py_ssize_t number_of_columns = PySequence_Size(columns);
+
+             for (Py_ssize_t i = 0; i < number_of_columns; i++) {
+
+                PyObject *column = PySequence_GetItem(columns, i); // Change to fast
+                char *column_char = PyString_AsString(column);
+
+                // Kind of bizzare, but if I alloc it myself and free after hb_get_add_column,
+                // I get memory errors. It seems to me that hb_get_add_column should be copying the contents
+                // but apparently it does not.
+                char *family = row_buff->getBuffer(strlen(column_char) + 1);
+                //char *family = (char *) malloc(sizeof(char) * (strlen(column_char) + 1));
+                if (!family) {
+                    return 12;
+                }
+
+                char *qualifier = row_buff->getBuffer(strlen(column_char)); // No need for +1 due to comma
+                //char *qualifier = (char *) malloc(sizeof(char) * (strlen(column_char)));
+                if (!qualifier) {
+                    return 12;
+                }
+
+                err = split_columns(column_char, family, qualifier);
+                if (err != 0) {
+                    return err;
+                }
+
+                int qualifier_len = strlen(qualifier);
+                if (qualifier_len == 0) {
+                    qualifier = NULL;
+                }
+
+                //err = hb_get_add_column(*((hb_get_t *)get), (byte_t *) family, strlen(family), (byte_t *) qualifier, qualifier_len);
+                switch (type) {
+                    case ADD_COLUMN_GET:
+                        err = hb_get_add_column(*((hb_get_t *) get), (byte_t *) family, strlen(family), (byte_t *) qualifier, qualifier_len);
+                        break;
+                    case ADD_COLUMN_SCAN:
+                        err = hb_scanner_add_column(*((hb_scanner_t *) get), (byte_t *) family, strlen(family), (byte_t *) qualifier, qualifier_len);
+                        break;
+                    case ADD_COLUMN_DELETE:
+                        if (!timestamp) {
+                            // TODO this only works for MapR
+                            timestamp = HBASE_LATEST_TIMESTAMP;
+                        }
+                        err = hb_delete_add_column(*((hb_delete_t *) get), (byte_t *) family, strlen(family), (byte_t *) qualifier, qualifier_len, timestamp);
+                        break;
+                    default:
+                        return -10;
+                }
+                //err = hb_get_add_column(*get, (byte_t *) family, strlen(family), (byte_t *) qualifier, qualifier_len);
+                if (err != 0) {
+                    //PyErr_Format(PyExc_ValueError, "Could not add column to get: %i", err);
+                    return err;
+                }
+                //free(family);
+                //free(qualifier);
+             }
+        }
+    }
+
+    return err;
+}
+
 static PyObject *Table_row(Table *self, PyObject *args) {
     char *row_key;
-    PyObject *columns;
+    PyObject *columns = NULL;
     PyObject *timestamp = NULL;
     uint64_t timestamp_int = NULL;
     PyObject *include_timestamp = NULL;
@@ -1161,6 +1345,8 @@ static PyObject *Table_row(Table *self, PyObject *args) {
     if (!self->connection->is_open) {
         Connection_open(self->connection);
     }
+
+
 
     if (timestamp) {
         if (timestamp != Py_None) {
@@ -1228,6 +1414,24 @@ static PyObject *Table_row(Table *self, PyObject *args) {
     }
 
     call_back_buffer->include_timestamp = include_timestamp_bool;
+    add_columns_type add_columns_t = ADD_COLUMN_GET;
+    err = row_add_columns(columns, &get, row_buff, add_columns_t, NULL);
+    if (err != 0) {
+        hb_get_destroy(get);
+        delete row_buff;
+        if (err == 13) {
+            return PyErr_NoMemory();
+        }
+        if (err == -2) {
+            PyErr_SetString(PyExc_TypeError, "columns must be list-like object\n");
+        } else if (err == -3) {
+            PyErr_SetString(PyExc_TypeError, "columns must be a list-like object, not a string\n");
+        } else {
+            // hb_get_add_column failed, probably a bug in pychbase code or libhbase
+            PyErr_Format(HBaseError, "Failed to add column to get: %i\n", err);
+        }
+        return NULL;
+    }
 
     // If err is nonzero, the callback is guarenteed to not have been invoked
     err = hb_get_send(self->connection->client, get, row_callback, call_back_buffer);
@@ -1253,7 +1457,12 @@ static PyObject *Table_row(Table *self, PyObject *args) {
     delete call_back_buffer;
 
     if (err != 0) {
-        PyErr_Format(HBaseError, "Get failed: %i", err);
+        if (err == 2) {
+            PyErr_Format(PyExc_ValueError, "Row failed; probably a bad column family: %i", err);
+        } else {
+            PyErr_Format(HBaseError, "Get failed with unknown error: %i", err);
+        }
+
         return NULL;
     }
 
@@ -1265,56 +1474,6 @@ void client_flush_callback(int32_t err, hb_client_t client, void *ctx) {
     // Is there a point to this?
 }
 
-/*
-import pychbase
-connection = pychbase._connection("hdnprd-c01-r03-01:7222,hdnprd-c01-r04-01:7222,hdnprd-c01-r05-01:7222")
-connection.open()
-
-table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testInteractive')
-table.put("snoop", {"f:foo": "bar"})
-*/
-// TODO change this name of this function
-/*
-* Given a fully qualified column, e.g. "f:foo", split it into its family and qualifier "f" and "foo" respectively
-* Caller should allocate memory for family and qualifier, and then free them later
-* Returns 0 on success
-* Returns 12 if given fq was null
-* Returns -10 if no colon ':' was found in the string
-*/
-static int split(char *fq, char *family, char *qualifier) {
-    OOM_OBJ_RETURN_ERRNO(fq);
-
-    int i = 0;
-    // Initialize family to length, + 1 for null pointer, - 1 for the colon
-    bool found_colon = false;
-
-    // this should either be strlen(fq) - 1, or strlen(fq) without the fq[i] != '\0' right?
-    for (i = 0; i < strlen(fq) && fq[i] != '\0'; i++) {
-        if (fq[i] != ':') {
-            family[i] = fq[i];
-        } else {
-            found_colon = true;
-            break;
-        }
-    }
-
-    if (!found_colon) {
-        return -10;
-    }
-
-    family[i] = '\0';
-
-    // This works with strlen(..) + 1 or without + 1 ... why ??
-    int qualifier_index = 0;
-    for (i=i + 1; i < strlen(fq) && fq[i] != '\0'; i++) {
-        qualifier[qualifier_index] = fq[i];
-        qualifier_index += 1;
-    }
-    qualifier[qualifier_index] = '\0';
-
-    return 0;
-
-}
 
 
 
@@ -1352,6 +1511,8 @@ void put_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result
      Either I'm doing something wrong, libhbase is doing something wrong, or perhaps it just doesn't work on MapR?
      In the event that buffering starts working, I need to change some of my frees or else I'll hit mem leak/segfaults
      */
+
+
 
 
     // TODO Dont error check this or else it will hang forever
