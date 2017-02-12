@@ -2687,11 +2687,20 @@ table.batch([('delete', 'hello{}'.format(i)) for i in range(100000)])
 */
 
 static PyObject *Table_batch(Table *self, PyObject *args) {
+    int err;
+
     PyObject *actions;
     PyObject *is_bufferable = NULL;
 
     PyObject *results = NULL;
     BatchCallBackBuffer *batch_call_back_buffer = NULL;
+
+    PyObject *ret_tuple = NULL;
+
+    int number_of_actions;
+    Py_ssize_t i;
+    add_columns_type add_columns_to_delete = ADD_COLUMN_DELETE;
+    uint64_t local_count = 0;
 
     if (!PyArg_ParseTuple(args, "O!|O!", &PyList_Type, &actions, &PyBool_Type, &is_bufferable)) {
         return NULL;
@@ -2705,22 +2714,15 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
         }
     }
 
-    int err;
-    int number_of_actions = PyList_Size(actions);
 
-    Py_ssize_t i;
+    number_of_actions = PyList_Size(actions);
 
     // TODO If in the future I return the results, set the PyList_new(number_of_actions);
     results = PyList_New(0);
-    OOM_OBJ_RETURN_NULL(results);
+    CHECK_MEM_EXC(results);
 
     batch_call_back_buffer = new BatchCallBackBuffer(number_of_actions);
-    if (!batch_call_back_buffer) {
-        Py_DECREF(results);
-        return PyErr_NoMemory();
-    }
-
-    add_columns_type add_columns_to_delete = ADD_COLUMN_DELETE;
+    CHECK_MEM_EXC(batch_call_back_buffer);
 
     for (i = 0; i < number_of_actions; i++) {
         hb_delete_t hb_delete = NULL;
@@ -2921,14 +2923,15 @@ inner_loop_error:
             // If this fails with an error and the call back is never invoked, my script would hang..
             // I'll temporarily raise an error until I can clarify this
             PyErr_Format(HBaseError, "Flush failed. Batch may be partially committed: %i", err);
-
+            // It's hard to tell if this is remotely safe or not.
+            // All of the mutations are being sent even if the flush fails
+            // That means their callbacks will be invoked and try to operate on a deleted batch_call_back_buffer right
             delete batch_call_back_buffer;
             Py_DECREF(results);
 
             return NULL;
         }
 
-        uint64_t local_count = 0;
         while (local_count < number_of_actions) {
             pthread_mutex_lock(&batch_call_back_buffer->mutex);
             local_count = batch_call_back_buffer->count;
@@ -2947,12 +2950,17 @@ inner_loop_error:
 
     delete batch_call_back_buffer;
 
-    PyObject *ret_tuple = Py_BuildValue("iO", errors, results);
+    ret_tuple = Py_BuildValue("iO", errors, results);
     OOM_OBJ_RETURN_NULL(ret_tuple);
 
     Py_DECREF(results);
 
     return ret_tuple;
+
+error:
+    if (results) Py_DECREF(results);
+    if (batch_call_back_buffer) delete batch_call_back_buffer;
+    return NULL;
 }
 
 
