@@ -533,6 +533,7 @@ struct CallBackBuffer {
     pthread_mutex_t mutex;
     BatchCallBackBuffer *batch_call_back_buffer;
     bool include_timestamp;
+    bool scan_include_data;
     //PyObject *rets;
     // TODO I don't require the Table *t anymore right?
     CallBackBuffer(RowBuffer *r, BatchCallBackBuffer *bcbb) {
@@ -543,6 +544,7 @@ struct CallBackBuffer {
         mutex = PTHREAD_MUTEX_INITIALIZER;
         ret = NULL;
         include_timestamp = false;
+        scan_include_data = true; // Set to false to only retrieve row key
     }
     ~CallBackBuffer() {
         /*
@@ -2002,6 +2004,8 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
             const byte_t *key;
             size_t keyLen;
 
+            PyObject *tuple;
+
             // API doesn't document when this returns something other than 0
             err = hb_result_get_key(results[r], &key, &keyLen);
             if (err != 0) {
@@ -2018,44 +2022,45 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 return;
             }
 
+            if (call_back_buffer->scan_include_data) {
 
+                // Do I need a null check?
+                dict = PyDict_New();
+                if (!dict) {
+                    pthread_mutex_lock(&call_back_buffer->mutex);
+                    call_back_buffer->err = 12;
+                    call_back_buffer->count = 1;
+                    delete call_back_buffer->rowBuf;
+                    pthread_mutex_unlock(&call_back_buffer->mutex);
 
-            // Do I need a null check?
-            dict = PyDict_New();
-            if (!dict) {
-                pthread_mutex_lock(&call_back_buffer->mutex);
-                call_back_buffer->err = 12;
-                call_back_buffer->count = 1;
-                delete call_back_buffer->rowBuf;
-                pthread_mutex_unlock(&call_back_buffer->mutex);
+                    hb_scanner_destroy(scan, NULL, NULL);
 
-                hb_scanner_destroy(scan, NULL, NULL);
+                    hb_result_destroy(results[r]);
 
-                hb_result_destroy(results[r]);
+                    return;
+                }
 
-                return;
-            }
+                // I cannot imagine this lock being necessary
+                //pthread_mutex_lock(&call_back_buffer->mutex);
+                err = read_result(results[r], dict, call_back_buffer->include_timestamp);
+                //pthread_mutex_unlock(&call_back_buffer->mutex);
+                if (err != 0) {
+                    pthread_mutex_lock(&call_back_buffer->mutex);
+                    call_back_buffer->err = err;
+                    call_back_buffer->count = 1;
+                    delete call_back_buffer->rowBuf;
+                    pthread_mutex_unlock(&call_back_buffer->mutex);
 
-            // I cannot imagine this lock being necessary
-            //pthread_mutex_lock(&call_back_buffer->mutex);
-            err = read_result(results[r], dict, call_back_buffer->include_timestamp);
-            //pthread_mutex_unlock(&call_back_buffer->mutex);
-            if (err != 0) {
-                pthread_mutex_lock(&call_back_buffer->mutex);
-                call_back_buffer->err = err;
-                call_back_buffer->count = 1;
-                delete call_back_buffer->rowBuf;
-                pthread_mutex_unlock(&call_back_buffer->mutex);
+                    // TODO If I decref this will i seg fault if i access it later?
+                    // Should it be set to a none?
+                    Py_DECREF(dict);
 
-                // TODO If I decref this will i seg fault if i access it later?
-                // Should it be set to a none?
-                Py_DECREF(dict);
+                    hb_scanner_destroy(scan, NULL, NULL);
 
-                hb_scanner_destroy(scan, NULL, NULL);
+                    hb_result_destroy(results[r]);
 
-                hb_result_destroy(results[r]);
-
-                return;
+                    return;
+                }
             }
 
             char *key_char = (char *) malloc(1 + keyLen);
@@ -2080,29 +2085,36 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
             strncpy(key_char, (char *)key, keyLen);
             key_char[keyLen] = '\0';
 
-            PyObject *tuple = Py_BuildValue("sO",(char *)key_char, dict);
-            free(key_char);
+            if (call_back_buffer->scan_include_data) {
+                tuple = Py_BuildValue("sO",(char *)key_char, dict);
+                free(key_char);
 
-            Py_DECREF(dict);
+                Py_DECREF(dict);
 
-            if (!tuple) {
-                pthread_mutex_lock(&call_back_buffer->mutex);
-                call_back_buffer->err = 12;
-                call_back_buffer->count = 1;
-                delete call_back_buffer->rowBuf;
-                pthread_mutex_unlock(&call_back_buffer->mutex);
+                if (!tuple) {
+                    pthread_mutex_lock(&call_back_buffer->mutex);
+                    call_back_buffer->err = 12;
+                    call_back_buffer->count = 1;
+                    delete call_back_buffer->rowBuf;
+                    pthread_mutex_unlock(&call_back_buffer->mutex);
 
-                hb_scanner_destroy(scan, NULL, NULL);
+                    hb_scanner_destroy(scan, NULL, NULL);
 
-                hb_result_destroy(results[r]);
+                    hb_result_destroy(results[r]);
 
-                return;
+                    return;
+                }
             }
 
             // I can't imagine this lock being necessary
             // However the helgrind report went from 24000 lines to 3500 after adding it?
             pthread_mutex_lock(&call_back_buffer->mutex);
-            err = PyList_Append(call_back_buffer->ret, tuple);
+            if (call_back_buffer->scan_include_data) {
+                err = PyList_Append(call_back_buffer->ret, tuple);
+            } else {
+                // TODO Do I need to check for errors and decryef on Py_BuildValue string?
+                err = PyList_Append(call_back_buffer->ret, Py_BuildValue("s", (char *) key_char));
+            }
             pthread_mutex_unlock(&call_back_buffer->mutex);
             if (err != 0) {
                 pthread_mutex_lock(&call_back_buffer->mutex);
@@ -2113,7 +2125,9 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
 
                 // TODO If I decref this will i seg fault if i access it later?
                 // Should itb e set to a none?
-                Py_DECREF(tuple);
+                if (call_back_buffer->scan_include_data) {
+                    Py_DECREF(tuple);
+                }
 
                 hb_scanner_destroy(scan, NULL, NULL);
 
@@ -2122,7 +2136,9 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 return;
             }
 
-            Py_DECREF(tuple);
+            if (call_back_buffer->scan_include_data) {
+                Py_DECREF(tuple);
+            }
 
             hb_result_destroy(results[r]);
         }
@@ -2298,6 +2314,23 @@ error:
     return NULL;
 }
 
+/*
+void PyObject *Table_delete_prefix(Table *self, PyObject *args) {
+    char *row_key_start;
+    char *row_key_stop;
+    PyObject *table_scan_args = NULL;
+    if (!PyArg_ParseTuple(args, "s", &row_key_start)) {
+        return NULL;
+    }
+
+    // row_key_stop = row_key_start + "~";
+    // table_scan_args = Py_BuildValue("(ss") null null rowkeys_only=true);
+    //PyObject row_keys = Table_scan(self, table_scan_args);
+    // Convert to batch
+
+    Py_RETURN_NONE;
+}
+*/
 /*
 * It's very important to delete the RowBuf in all possible cases in this call back
 * or else it will result in a memory leak
@@ -3231,6 +3264,50 @@ static PyObject *foo(PyObject *self, PyObject *args) {
 }
 */
 
+static PyObject *keywords(PyObject *self, PyObject *args, PyObject *kwargs) {
+    char *a;
+    char *b;
+    char *foo = NULL;
+    char *bar = NULL;
+    char *baz = NULL;
+
+    static char *kwlist[] = {"a", "b", "foo", "bar", "baz", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "ss|sss", kwlist, &a, &b, &foo, &bar, &baz)) {
+        return NULL;
+    }
+
+    printf("a is %s\n", a);
+    printf("b is %s\n", b);
+    printf("foo is %s\n", foo);
+    printf("bar is %s\n", bar);
+    printf("baz is %s\n", baz);
+
+    Py_RETURN_NONE;
+}
+/*
+static PyObject *keywords(PyObject *self, PyObject *args, PyObject *keywds) {
+    int voltage;
+    char *state = "a stiff";
+    char *action = "voom";
+    char *type = "Norwegian Blue";
+
+    static char *kwlist[] = {"voltage", "state", "action", "type", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, keywds, "i|sss", kwlist,
+                                     &voltage, &state, &action, &type))
+        return NULL;
+
+    printf("-- This parrot wouldn't %s if you put %i Volts through it.\n",
+           action, voltage);
+    printf("-- Lovely plumage, the %s -- It's %s!\n", type, state);
+
+    Py_INCREF(Py_None);
+
+    return Py_None;
+}
+*/
+
 static PyMethodDef SpamMethods[] = {
     {"system",  pychbase_system, METH_VARARGS, "Execute a shell command."},
     {"lol", lol, METH_VARARGS, "your a lol"},
@@ -3247,6 +3324,7 @@ static PyMethodDef SpamMethods[] = {
     {"print_list_fast", print_list_fast, METH_VARARGS, "prints a list using the fast api"},
     {"print_list_t", print_list_t, METH_VARARGS, "pritns a list of tuples"},
     {"py_buildvalue_char", py_buildvalue_char, METH_VARARGS, "build value string"},
+    {"keywords", (PyCFunction) keywords, METH_VARARGS | METH_KEYWORDS, "practice kwargs"},
     {NULL, NULL, 0, NULL}
 };
 
