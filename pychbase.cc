@@ -1669,6 +1669,7 @@ lol()
 * Returns -7 if any key in dict is not a string
 * Returns -8 if any value in dict is not a string
 * Returns -1 if any key in dict is an empty string
+* Returns -9 if timestamp was negative
 * Returns an unknown error code if hb_put_add_cell fails - presumably a libhbase/hbase failure after all my checks
 */
 static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObject *dict, hb_put_t *hb_put, bool is_bufferable, uint64_t timestamp, bool is_wal) {
@@ -1682,6 +1683,12 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
     int size = PyDict_Size(dict);
     if (size < 1) {
         return -5;
+    }
+
+    if (timestamp) {
+        if (timestamp < 0) {
+            return -9;
+        }
     }
 
     err = hb_put_create((byte_t *)row_key, strlen(row_key), hb_put);
@@ -1850,30 +1857,33 @@ static PyObject *Table_put(Table *self, PyObject *args) {
         // TODO A cool feature would be to let the user specify column families at connection.table() time (since the API doesn't let me figure it out)
         // I could then validate it in a batched put before sending it to hbase
         if (err == -10) {
-            PyErr_SetString(PyExc_ValueError, "All keys must contain a colon delimiting the family and qualifier");
+            PyErr_SetString(PyExc_ValueError, "All keys must contain a colon delimiting the family and qualifier\n");
 
         } else if (err == -6) {
-            PyErr_SetString(PyExc_ValueError, "Qualifier must not be empty string");
+            PyErr_SetString(PyExc_ValueError, "Qualifier must not be empty string\n");
 
         } else if (err == -4) {
-            PyErr_SetString(PyExc_ValueError, "Value must not be empty string");
+            PyErr_SetString(PyExc_ValueError, "Value must not be empty string\n");
 
         } else if (err == -7) {
-            PyErr_SetString(PyExc_TypeError, "All keys must contain a colon delimited string");
+            PyErr_SetString(PyExc_TypeError, "All keys must contain a colon delimited string\n");
 
         } else if (err == -8) {
-            PyErr_SetString(PyExc_TypeError, "All values must be string");
+            PyErr_SetString(PyExc_TypeError, "All values must be string\n");
 
+        } else if (err == -9) {
+
+            PyErr_Format(PyExc_ValueError, "Timestamp '%i' may not be negative\n", err);
         } else if (err == -5) {
             // TODO Should I really fail here? Why not just take no action?
-            PyErr_SetString(PyExc_ValueError, "Put dictionary was empty");
+            PyErr_SetString(PyExc_ValueError, "Put dictionary was empty\n");
 
         } else if (err == -1) {
-            PyErr_SetString(PyExc_ValueError, "Column Qualifier was empty");
+            PyErr_SetString(PyExc_ValueError, "Column Qualifier was empty\n");
 
         } else {
             // Hmm would it still be user error at this point?
-            PyErr_Format(PyExc_ValueError, "Failed to make put: %i", err);
+            PyErr_Format(PyExc_ValueError, "Failed to make put: %i\n", err);
         }
         goto error;
     }

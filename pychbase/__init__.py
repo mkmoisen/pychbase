@@ -36,9 +36,11 @@ class Connection(object):
     def create_table(self, name, families):
         self._connection.create_table(name, families)
 
-    def delete_table(self, table_name, disable=False):
-        # TODO I'm deleting it even if it's not disabled
-        self._connection.delete_table(table_name)
+    def delete_table(self, name, disable=False):
+        if not disable:
+            if self.is_table_enabled(name):
+                raise ValueError("Table must be disabled before deleting")
+        self._connection.delete_table(name)
 
     def open(self):
         pass

@@ -567,6 +567,9 @@ class TestCTableTimestamp(unittest.TestCase):
 
         self.assertEquals(i, 10)
 
+    def test_negative_timestamp(self):
+        self.assertRaises(ValueError, self.table.put, 'foo', {'f:foo': 'bar'}, -1)
+
 
 
 
@@ -1258,7 +1261,7 @@ class TestPython(unittest.TestCase):
 
     def tearDown(self):
         try:
-            self.connection.delete_table(TABLE_NAME)
+            self.connection.delete_table(TABLE_NAME, disable=True)
         except ValueError:
             pass
         self.connection.close()
@@ -1270,11 +1273,19 @@ class TestPython(unittest.TestCase):
         rows = self.table.rows(['foo%i' % i for i in range(1, 4)])
         self.assertEquals(rows, [{'f:foo': 'bar%i' % i} for i in range(1, 4)])
 
+    def test_delete_table_no_disable(self):
+        self.assertRaises(ValueError, self.connection.delete_table, TABLE_NAME)
+        self.connection.disable_table(TABLE_NAME)
+        self.connection.delete_table(TABLE_NAME)
+
+    def test_delete_table_yes_disable(self):
+        self.connection.delete_table(TABLE_NAME, disable=True)
+
 class TestPythonHappy(unittest.TestCase):
     def setUp(self):
         connection = Connection()
         try:
-            connection.delete_table(TABLE_NAME)
+            connection.delete_table(TABLE_NAME, disable=True)
         except ValueError:
             pass
 
@@ -1283,7 +1294,7 @@ class TestPythonHappy(unittest.TestCase):
     def tearDown(self):
         connection = Connection()
         try:
-            connection.delete_table(TABLE_NAME)
+            connection.delete_table(TABLE_NAME, disable=True)
         except ValueError:
             pass
 
@@ -1394,7 +1405,7 @@ class TestPythonRowPrefix(unittest.TestCase):
 
     def tearDown(self):
         try:
-            self.connection.delete_table(TABLE_NAME)
+            self.connection.delete_table(TABLE_NAME, disable=True)
         except ValueError:
             pass
         self.connection.close()
