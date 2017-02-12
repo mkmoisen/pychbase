@@ -835,6 +835,82 @@ class TestCTableScan(unittest.TestCase):
         self.assertRaises(TypeError, self.table.scan, '', '', None, None, 5, 'invalid')
 
 
+class TestCTableScanColumns(unittest.TestCase):
+    def setUp(self):
+        self.connection = _connection(ZOOKEEPERS)
+
+    def tearDown(self):
+        try:
+            self.connection.delete_table(TABLE_NAME)
+        except ValueError:
+            pass
+        self.connection.close()
+
+    def test_scan_columns_happy(self):
+        self.connection.create_table(TABLE_NAME, {'f': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+        for i in range(0, 10):
+            self.table.put('foo%i' % i, {'f:a': 'foo%i' % i, 'f:ab': 'bar%i' % i, 'f:abc': 'baz%i' % i})
+
+        i = 0
+        for row, data in self.table.scan('', '', ('f',)):
+            self.assertEquals(data, {'f:a': 'foo%i' % i, 'f:ab': 'bar%i' % i, 'f:abc': 'baz%i' % i})
+            i += 1
+        self.assertEquals(i, 10)
+
+        i = 0
+        for row, data in self.table.scan('', '', ('f:',)):
+            self.assertEquals(data, {'f:a': 'foo%i' % i, 'f:ab': 'bar%i' % i, 'f:abc': 'baz%i' % i})
+            i += 1
+        self.assertEquals(i, 10)
+
+        i = 0
+        for row, data in self.table.scan('', '', ('f:a',)):
+            self.assertEquals(data, {'f:a': 'foo%i' % i})
+            i += 1
+        self.assertEquals(i, 10)
+
+        i = 0
+        for row, data in self.table.scan('', '', ('f:a', 'f:ab')):
+            self.assertEquals(data, {'f:a': 'foo%i' % i, 'f:ab': 'bar%i' % i})
+            i += 1
+        self.assertEquals(i, 10)
+
+        i = 0
+        for row, data in self.table.scan('', '', ('f:a', 'f:ab', 'f:abc',)):
+            self.assertEquals(data, {'f:a': 'foo%i' % i, 'f:ab': 'bar%i' % i, 'f:abc': 'baz%i' % i})
+            i += 1
+        self.assertEquals(i, 10)
+
+        i = 0
+        for row, data in self.table.scan('', '', ('f:nope',)):
+            self.assertEquals(data, {})
+            i += 1
+        self.assertEquals(i, 0)
+
+        i = 0
+        for row, data in self.table.scan('', '', ('f:a', 'f:nope')):
+            self.assertEquals(data, {'f:a': 'foo%i' % i})
+            i += 1
+        self.assertEquals(i, 10)
+
+    def test_columns_type(self):
+        self.connection.create_table(TABLE_NAME, {'f': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+        self.assertRaises(TypeError, self.table.scan, '', '', 'invalid')
+        self.assertRaises(TypeError, self.table.scan, '', '', {'no', 'sets'})
+        self.assertRaises(TypeError, self.table.scan, '', '', {'no': 'dicts'})
+
+    def test_bad_column_family(self):
+        self.connection.create_table(TABLE_NAME, {'f': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+        self.assertRaises(ValueError, self.table.scan, '', '', ('bad',))
+        self.assertRaises(ValueError, self.table.scan, '', '', ('bad:',))
+        self.assertRaises(ValueError, self.table.scan, '', '', ('bad:bad',))
+        self.assertRaises(ValueError, self.table.scan, '', '', ('f:good', 'bad:bad'))
+
+
+
 
 
 

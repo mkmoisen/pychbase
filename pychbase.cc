@@ -1426,6 +1426,8 @@ static PyObject *Table_row(Table *self, PyObject *args) {
             PyErr_SetString(PyExc_TypeError, "columns must be list-like object\n");
         } else if (err == -3) {
             PyErr_SetString(PyExc_TypeError, "columns must be a list-like object, not a string\n");
+        } else if (err == -10) {
+            PyErr_SetString(HBaseError, "pychbase has a severe bug for row_add_columns method; bad type\n");
         } else {
             // hb_get_add_column failed, probably a bug in pychbase code or libhbase
             PyErr_Format(HBaseError, "Failed to add column to get: %i\n", err);
@@ -1462,7 +1464,7 @@ static PyObject *Table_row(Table *self, PyObject *args) {
         } else {
             PyErr_Format(HBaseError, "Get failed with unknown error: %i", err);
         }
-
+        // TODO Don't i need to xdecref ret?
         return NULL;
     }
 
@@ -2241,6 +2243,29 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
         return PyErr_NoMemory();
     }
 
+    add_columns_type add_columns_t = ADD_COLUMN_SCAN;
+    err = row_add_columns(columns, &scan, row_buf, add_columns_t, NULL);
+    // TODO could this be a macro?
+    if (err != 0) {
+        hb_scanner_destroy(scan, NULL, NULL);
+        delete row_buf;
+        delete call_back_buffer;
+        if (err == 13) {
+            return PyErr_NoMemory();
+        }
+        if (err == -2) {
+            PyErr_SetString(PyExc_TypeError, "columns must be list-like object\n");
+        } else if (err == -3) {
+            PyErr_SetString(PyExc_TypeError, "columns must be a list-like object, not a string\n");
+        } else if (err == -10) {
+            PyErr_SetString(HBaseError, "pychbase has a severe bug for row_add_columns method; bad type\n");
+        } else {
+            // hb_get_add_column failed, probably a bug in pychbase code or libhbase
+            PyErr_Format(HBaseError, "Failed to add column to get: %i\n", err);
+        }
+        return NULL;
+    }
+
     // The only time this returns non zero is if it cannot get the JNI, and callback is guaranteed not to execute
     err = hb_scanner_next(scan, scan_callback, call_back_buffer);
     if (err != 0) {
@@ -2265,7 +2290,11 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
     delete call_back_buffer;
 
     if (err != 0) {
-        PyErr_Format(HBaseError, "Scan failed: %i", err);
+        if (err == 2) {
+            PyErr_Format(PyExc_ValueError, "Row failed; probably a bad column family: %i", err);
+        } else {
+            PyErr_Format(HBaseError, "Scan failed with unknown error: %i", err);
+        }
         Py_XDECREF(ret);
         return NULL;
     }
