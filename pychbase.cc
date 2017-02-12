@@ -2276,38 +2276,30 @@ static int make_delete(Table *self, char *row_key, hb_delete_t *hb_delete, uint6
     OOM_OBJ_RETURN_ERRNO(row_key);
     // TODO I shouldn't check hb_delete for null right?
 
-    if (strlen(row_key) == 0) {
-        err = -5;
-        return err;
-    }
+    CHECK_ERRNO(strlen(row_key) != 0, -5);
 
     err = hb_delete_create((byte_t *)row_key, strlen(row_key), hb_delete);
-    if (err != 0) {
-        return err;
-    }
-    OOM_OBJ_RETURN_ERRNO(hb_delete);
+    CHECK(err == 0);
+    CHECK_MEM(hb_delete);
 
     err = hb_mutation_set_table((hb_mutation_t)*hb_delete, self->table_name, strlen(self->table_name));
-    if (err != 0) {
-        return err;
-    }
+    CHECK(err == 0);
 
     if (timestamp) {
         err = hb_delete_set_timestamp((hb_mutation_t) *hb_delete, timestamp);
-    }
-    if (err != 0) {
-        return err;
+        CHECK(err == 0);
     }
 
     // TODO this returns 95 for any value: EOPNOTSUPP  Operation not supported on transport endpoint
+    // Try this on cloudera maybe
     if (is_wal) {
         hb_mutation_set_durability((hb_mutation_t) *hb_delete, DURABILITY_SYNC_WAL);
     } else {
         hb_mutation_set_durability((hb_mutation_t) *hb_delete, DURABILITY_SKIP_WAL);
     }
 
-
-
+    return err;
+error:
     return err;
 }
 
