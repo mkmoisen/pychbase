@@ -22,6 +22,23 @@ class TestCConnection(unittest.TestCase):
         self.assertFalse(connection.is_open())
         connection.close()
 
+    def test_enable_table(self):
+        connection = _connection(ZOOKEEPERS)
+        self.assertRaises(ValueError, connection.is_table_enabled, TABLE_NAME)
+        self.assertRaises(ValueError, connection.enable_table, TABLE_NAME)
+        self.assertRaises(ValueError, connection.disable_table, TABLE_NAME)
+        connection.create_table(TABLE_NAME, {'f': {}})
+        self.assertEquals(connection.is_table_enabled(TABLE_NAME), True)
+        connection.disable_table(TABLE_NAME)
+        self.assertEquals(connection.is_table_enabled(TABLE_NAME), False)
+        # This wont throw an error in MapR, maybe it would in Cloudera
+        connection.disable_table(TABLE_NAME)
+        connection.enable_table(TABLE_NAME)
+        self.assertEquals(connection.is_table_enabled(TABLE_NAME), True)
+        connection.delete_table(TABLE_NAME)
+        connection.close()
+
+
 
 class TestCConnectionManageTable(unittest.TestCase):
     def setUp(self):

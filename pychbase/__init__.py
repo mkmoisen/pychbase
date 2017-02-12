@@ -52,14 +52,15 @@ class Connection(object):
     def tables(self):
         raise NotImplementedError
 
-    def enable_table(self):
-        raise NotImplementedError
+    def enable_table(self, name):
+        return self._connection.enable_table(name)
 
-    def disable_table(self):
-        raise NotImplementedError
+    def disable_table(self, name):
+        return self._connection.disable_table(name)
 
     def is_table_enabled(self, name):
-        raise NotImplementedError
+        # How do we do name space here?
+        return self._connection.is_table_enabled(name)
 
     def compact_table(self, name, major=False):
         raise NotImplementedError
@@ -141,15 +142,20 @@ class Table(object):
         raise NotImplementedError
 
     def counter_get(self, row, column):
+        # Don't see anything in libhbase for this
         raise NotImplementedError
 
     def counter_set(self, row, column, value=0):
+        # Don't see anything in libhbase for this
         raise NotImplementedError
 
     def counter_inc(self, row, column, value=1):
+        # mutations.h hb_increment_create
+        # mutations.h hb_increment_add_column
         raise NotImplementedError
 
     def counter_dec(self, row, column, value=1):
+        # mutations.h hb_increment_add_column
         raise NotImplementedError
 
 

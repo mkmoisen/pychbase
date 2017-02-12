@@ -936,12 +936,84 @@ for i in range(1,20):
 
 
 */
+
+static PyObject *Connection_is_table_enabled(Connection *self, PyObject *args) {
+    char *name_space = NULL;
+    char *table_name = NULL;
+
+    if (!PyArg_ParseTuple(args, "s|s", &table_name, &name_space)) {
+        return NULL;
+    }
+
+    if (!self->is_open) {
+        Connection_open(self);
+    }
+
+    int err = hb_admin_table_enabled(self->admin, name_space, table_name);
+    if (err == 0) {
+        return Py_True;
+    } else if (err == HBASE_TABLE_DISABLED) {
+        return Py_False;
+    } else {
+        // TODO check for bad table name and and too long table name and etc
+        PyErr_Format(PyExc_ValueError, "Unknown error while checking if table '%s' exists: %i", table_name, err);
+        return NULL;
+    }
+}
+
+static PyObject *Connection_enable_table(Connection *self, PyObject *args) {
+    char *name_space = NULL;
+    char *table_name = NULL;
+
+    if (!PyArg_ParseTuple(args, "s|s", &table_name, &name_space)) {
+        return NULL;
+    }
+
+    if (!self->is_open) {
+        Connection_open(self);
+    }
+
+    int err = hb_admin_table_enable(self->admin, name_space, table_name);
+    if (err == 0) {
+        Py_RETURN_NONE;
+    } else {
+        // TODO check for bad table name and and too long table name and etc
+        PyErr_Format(PyExc_ValueError, "Unknown error while enabling table '%s': %i", table_name, err);
+        return NULL;
+    }
+}
+
+static PyObject *Connection_disable_table(Connection *self, PyObject *args) {
+    char *name_space = NULL;
+    char *table_name = NULL;
+
+    if (!PyArg_ParseTuple(args, "s|s", &table_name, &name_space)) {
+        return NULL;
+    }
+
+    if (!self->is_open) {
+        Connection_open(self);
+    }
+
+    int err = hb_admin_table_disable(self->admin, name_space, table_name);
+    if (err == 0) {
+        Py_RETURN_NONE;
+    } else {
+        // TODO check for bad table name and and too long table name and etc
+        PyErr_Format(PyExc_ValueError, "Unknown error while enabling table '%s': %i", table_name, err);
+        return NULL;
+    }
+}
+
 static PyMethodDef Connection_methods[] = {
     {"open", (PyCFunction) Connection_open, METH_NOARGS, "Opens the connection"},
     {"close", (PyCFunction) Connection_close, METH_NOARGS, "Closes the connection"},
     {"is_open", (PyCFunction) Connection_is_open, METH_NOARGS,"Checks if the connection is open"},
     {"create_table", (PyCFunction) Connection_create_table, METH_VARARGS, "Creates an HBase table"},
     {"delete_table", (PyCFunction) Connection_delete_table, METH_VARARGS, "Deletes an HBase table"},
+    {"is_table_enabled", (PyCFunction) Connection_is_table_enabled, METH_VARARGS, "Checks if an HBase Table is enabled"},
+    {"enable_table", (PyCFunction) Connection_enable_table, METH_VARARGS, "Enabled an HBase Table"},
+    {"disable_table", (PyCFunction) Connection_disable_table, METH_VARARGS, "Disables an HBase Table"},
     {NULL},
 };
 
@@ -2786,7 +2858,7 @@ static PyTypeObject TableType = {
    0,                         /* tp_setattro */
    0,                         /* tp_as_buffer */
    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags*/
-   "Connection object",        /* tp_doc */
+   "Table object",        /* tp_doc */
    0,                         /* tp_traverse */
    0,                         /* tp_clear */
    0,                         /* tp_richcompare */
