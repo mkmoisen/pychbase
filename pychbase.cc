@@ -623,7 +623,7 @@ static PyObject *Connection_close(Connection *self) {
         CallBackBuffer *call_back_buffer = new CallBackBuffer(NULL, NULL);
         OOM_OBJ_RETURN_NULL(call_back_buffer);
 
-        hb_admin_destroy(self->admin, admin_disconnection_callback, call_back_buffer);
+        hb_admin_destroy(self->admin, admin_disconnection_callback, call_back_buffer);  // always returns 0
 
         uint64_t local_count = 0;
         while (local_count != 1) {
@@ -660,7 +660,6 @@ static void Connection_dealloc(Connection *self) {
 static int Connection_init(Connection *self, PyObject *args, PyObject *kwargs) {
     PyObject *zookeepers, *tmp;
 
-    // Add an is_open boolean
     if (!PyArg_ParseTuple(args, "O", &zookeepers)) {
         return -1;
     }
@@ -754,31 +753,24 @@ static PyObject *Connection_delete_table(Connection *self, PyObject *args) {
         return NULL;
     }
 
+    int err;
+
     if (!self->is_open) {
         Connection_open(self);
     }
 
     int table_name_length = strlen(table_name);
-    if (table_name_length > 1000) {
-        PyErr_SetString(PyExc_ValueError, "Table name is too long\n");
-        return NULL;
-    }
-
-    int err;
+    CHECK_SET_EXC(table_name_length <= 1000, PyExc_ValueError, "Table name is too long\n");
 
     err = hb_admin_table_exists(self->admin, NULL, table_name);
-    if (err != 0) {
-        PyErr_Format(PyExc_ValueError, "Table '%s' does not exist\n", table_name);
-        return NULL;
-    }
+    CHECK_FORMAT_EXC(err == 0, PyExc_ValueError, "Table '%s' does not exist: %i\n", table_name, err);
 
     err = hb_admin_table_delete(self->admin, name_space, table_name);
-    if (err != 0) {
-        PyErr_Format(HBaseError, "Failed to delete table '%s': %i\n", table_name, err);
-        return NULL;
-    }
+    CHECK_FORMAT_EXC(err == 0, HBaseError, "Failed to delete table '%s': %i\n", table_name, err);
 
     Py_RETURN_NONE;
+error:
+    return NULL;
 }
 
 typedef int32_t (*set_column_family_attribute)(hb_columndesc, int32_t);
