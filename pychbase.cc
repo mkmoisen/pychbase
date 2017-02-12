@@ -2654,9 +2654,44 @@ table.batch([('delete', 'hello{}'.format(i)) for i in range(100000)])
 */
 
 
+#define CHECK_BATCH_INNER(A) \
+    do {                \
+        if (!(A)) {     \
+            goto inner_loop_error; \
+        }   \
+    } while (0);
+
+#define CHECK_BATCH_INNER_ERRNO(A, errno) \
+    do {                \
+        if (!(A)) {     \
+            err = errno;    \
+            goto inner_loop_error; \
+        }   \
+    } while (0);
+
+/*
+#define CHECK_SET_EXC(A, exc_type, statement) \
+    do {                \
+        if (!(A)) {     \
+            PyErr_SetString(exc_type, statement);    \
+            goto error; \
+        }   \
+    } while (0);
+
+#define CHECK_MEM_EXC(A) \
+    do {    \
+        if (!(A)) { \
+            PyErr_SetNone(PyExc_MemoryError);   \
+        }   \
+    } while (0);
+*/
+
 static PyObject *Table_batch(Table *self, PyObject *args) {
     PyObject *actions;
     PyObject *is_bufferable = NULL;
+
+    PyObject *results = NULL;
+    BatchCallBackBuffer *batch_call_back_buffer = NULL;
 
     if (!PyArg_ParseTuple(args, "O!|O!", &PyList_Type, &actions, &PyBool_Type, &is_bufferable)) {
         return NULL;
@@ -2672,392 +2707,162 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
     int err;
     int number_of_actions = PyList_Size(actions);
-    PyObject *tuple;
+
     Py_ssize_t i;
 
     // TODO If in the future I return the results, set the PyList_new(number_of_actions);
-    PyObject *results = PyList_New(0);
+    results = PyList_New(0);
     OOM_OBJ_RETURN_NULL(results);
 
-    BatchCallBackBuffer *batch_call_back_buffer = new BatchCallBackBuffer(number_of_actions);
+    batch_call_back_buffer = new BatchCallBackBuffer(number_of_actions);
     if (!batch_call_back_buffer) {
         Py_DECREF(results);
         return PyErr_NoMemory();
     }
 
+    add_columns_type add_columns_to_delete = ADD_COLUMN_DELETE;
+
     for (i = 0; i < number_of_actions; i++) {
-        RowBuffer *rowBuf = new RowBuffer();
-        if (!rowBuf) {
-            pthread_mutex_lock(&batch_call_back_buffer->mutex);
-            batch_call_back_buffer->errors++;
-            batch_call_back_buffer->count++;
-            pthread_mutex_unlock(&batch_call_back_buffer->mutex);
-            continue;
-        }
+        hb_delete_t hb_delete = NULL;
+        hb_put_t hb_put = NULL;
 
-        CallBackBuffer *call_back_buffer = new CallBackBuffer(rowBuf, batch_call_back_buffer);
-        if (!call_back_buffer) {
-            pthread_mutex_lock(&batch_call_back_buffer->mutex);
-            batch_call_back_buffer->errors++;
-            batch_call_back_buffer->count++;
-            pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+        RowBuffer *rowBuf = NULL;
+        CallBackBuffer *call_back_buffer = NULL;
 
-            delete rowBuf;
+        PyObject *tuple = NULL; // TODO do I need to do anything in inner_loop_error ?
+        PyObject *mutation_type = NULL; // TODO do I need to do anything in inner_loop_error ?
+        char *mutation_type_char = NULL; // TODO ..
+        PyObject *row_key = NULL; // TODO ..
+        char *row_key_char = NULL; // TODO ..
+        // dict is only used for puts
+        PyObject *dict = NULL; // TODO dont i need to decref
+        // columns is only used for deletes
+        PyObject *columns = NULL; // TODO ..
+        PyObject *timestamp = NULL;
+        PyObject *is_wal = NULL;
 
-            continue;
-        }
+        uint64_t timestamp_int = NULL;
+        bool is_wal_bool = true;
+
+
+        rowBuf = new RowBuffer();
+        CHECK_BATCH_INNER_ERRNO(rowBuf, 12);
+
+        call_back_buffer = new CallBackBuffer(rowBuf, batch_call_back_buffer);
+        CHECK_BATCH_INNER_ERRNO(call_back_buffer, 12);
 
         batch_call_back_buffer->call_back_buffers.push_back(call_back_buffer);
 
         tuple = PyList_GetItem(actions, i); // borrows reference
-        // Is this check even necessary? Docs say it is  Borrowed Reference
-        if (!tuple) {
-            pthread_mutex_lock(&batch_call_back_buffer->mutex);
-            batch_call_back_buffer->errors++;
-            batch_call_back_buffer->count++;
-            pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+        CHECK_BATCH_INNER_ERRNO(tuple, 12);  // Is this check even necessary? Docs say it is  Borrowed Reference
 
-            call_back_buffer->count++;
-            call_back_buffer->err = 12;
-
-            delete rowBuf;
-
-            continue;
-        }
-
-        if (!PyTuple_Check(tuple)) {
-            pthread_mutex_lock(&batch_call_back_buffer->mutex);
-            batch_call_back_buffer->errors++;
-            batch_call_back_buffer->count++;
-            pthread_mutex_unlock(&batch_call_back_buffer->mutex);
-
-            call_back_buffer->count++;
-            call_back_buffer->err = -1; //TODO BETTER
-
-            delete rowBuf;
-
-            continue;
-        }
+        // Must be a tuple
+        CHECK_BATCH_INNER_ERRNO(PyTuple_Check(tuple), -1); // TODO BETTER ERR
 
         // Must contain type and row key at this point
-        if (PyTuple_Size(tuple) < 2) {
-            pthread_mutex_lock(&batch_call_back_buffer->mutex);
-            batch_call_back_buffer->errors++;
-            batch_call_back_buffer->count++;
-            pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+        CHECK_BATCH_INNER_ERRNO(PyTuple_Size(tuple) >= 2, -1); // TODO BETTER ERR
 
-            call_back_buffer->count++;
-            call_back_buffer->err = 12;
+        mutation_type = PyTuple_GetItem(tuple, 0);
+        CHECK_BATCH_INNER_ERRNO(mutation_type, 12); // Is this check even necessary
 
-            delete rowBuf;
+        // Mutation Type must be string, notably 'put' or 'delete'
+        // TODO this should be changed to enum or constant int
+        CHECK_BATCH_INNER_ERRNO(PyObject_TypeCheck(mutation_type, &PyBaseString_Type), -1); // TODO BETTER ERR
 
-            continue;
-        }
+        mutation_type_char = PyString_AsString(mutation_type);
+        CHECK_BATCH_INNER_ERRNO(mutation_type_char, 12); // Is this check even necessary
 
-        PyObject *mutation_type = PyTuple_GetItem(tuple, 0);
-        // Is this check even necessary
-        if (!mutation_type) {
-            pthread_mutex_lock(&batch_call_back_buffer->mutex);
-            batch_call_back_buffer->errors++;
-            batch_call_back_buffer->count++;
-            pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+        row_key = PyTuple_GetItem(tuple, 1);
+        CHECK_BATCH_INNER_ERRNO(row_key, 12); // Is this check even necessary
 
-            call_back_buffer->count++;
-            call_back_buffer->err = 12;
+        // Row key must be string
+        CHECK_BATCH_INNER_ERRNO(PyObject_TypeCheck(row_key, &PyBaseString_Type), -1); // TODO BETTER ERR
 
-            delete rowBuf;
-
-            continue;
-        }
-
-        if (!PyObject_TypeCheck(mutation_type, &PyBaseString_Type)) {
-            pthread_mutex_lock(&batch_call_back_buffer->mutex);
-            batch_call_back_buffer->errors++;
-            batch_call_back_buffer->count++;
-            pthread_mutex_unlock(&batch_call_back_buffer->mutex);
-
-            call_back_buffer->count++;
-            call_back_buffer->err = -1; //TODO BETTER
-
-            delete rowBuf;
-
-            continue;
-        }
-
-        char *mutation_type_char = PyString_AsString(mutation_type);
-        // Is this check even necessary
-        if (!mutation_type_char) {
-            pthread_mutex_lock(&batch_call_back_buffer->mutex);
-            batch_call_back_buffer->errors++;
-            batch_call_back_buffer->count++;
-            pthread_mutex_unlock(&batch_call_back_buffer->mutex);
-
-            call_back_buffer->count++;
-            call_back_buffer->err = 12;
-
-            delete rowBuf;
-
-            continue;
-        }
-
-        PyObject *row_key = PyTuple_GetItem(tuple, 1);
-        // Is this check even necessary
-        if (!row_key) {
-
-            pthread_mutex_lock(&batch_call_back_buffer->mutex);
-            batch_call_back_buffer->errors++;
-            batch_call_back_buffer->count++;
-            pthread_mutex_unlock(&batch_call_back_buffer->mutex);
-
-            call_back_buffer->count++;
-            call_back_buffer->err = 12;
-
-            delete rowBuf;
-
-            continue;
-        }
-
-        if (!PyObject_TypeCheck(row_key, &PyBaseString_Type)) {
-            pthread_mutex_lock(&batch_call_back_buffer->mutex);
-            batch_call_back_buffer->errors++;
-            batch_call_back_buffer->count++;
-            pthread_mutex_unlock(&batch_call_back_buffer->mutex);
-
-            call_back_buffer->count++;
-            call_back_buffer->err = -1; //TODO BETTER
-
-            delete rowBuf;
-
-            continue;
-        }
-
-        char *row_key_char = PyString_AsString(row_key);
+        row_key_char = PyString_AsString(row_key);
         // Is this check even necessary
         // Docs seem to indicate it is not https://docs.python.org/2/c-api/string.html#c.PyString_AsString
-        if (!row_key_char) {
-            pthread_mutex_lock(&batch_call_back_buffer->mutex);
-            batch_call_back_buffer->errors++;
-            batch_call_back_buffer->count++;
-            pthread_mutex_unlock(&batch_call_back_buffer->mutex);
-
-            call_back_buffer->count++;
-            call_back_buffer->err = 12;
-
-            delete rowBuf;
-
-            continue;
-        }
+        CHECK_BATCH_INNER_ERRNO(row_key_char, 12);
 
         if (strcmp(mutation_type_char, "put") == 0) {
             // Must contain type, row key, data at this point
-            if (PyTuple_Size(tuple) < 3) {
-                // TODO this is only valid if I have a bug as opposed to the user. Would it be better to crash?
-                pthread_mutex_lock(&batch_call_back_buffer->mutex);
-                batch_call_back_buffer->errors++;
-                batch_call_back_buffer->count++;
-                pthread_mutex_unlock(&batch_call_back_buffer->mutex);
-
-                call_back_buffer->count++;
-                call_back_buffer->err = -1; // TODO BETTER
-
-                delete rowBuf;
-
-                continue;
-            }
+            CHECK_BATCH_INNER_ERRNO(PyTuple_Size(tuple) >= 3, -1); // TODO BETTER ERR
 
             // TODO DO I NEED TO DECREF DICT TIMESTAMP AND IS ALL ?
-            PyObject *dict = PyTuple_GetItem(tuple, 2);
+            dict = PyTuple_GetItem(tuple, 2);
+            CHECK_BATCH_INNER_ERRNO(dict, 12); // Is this check even necessary
 
-            // Is this check even necessary
-            if (!dict) {
-                pthread_mutex_lock(&batch_call_back_buffer->mutex);
-                batch_call_back_buffer->errors++;
-                batch_call_back_buffer->count++;
-                pthread_mutex_unlock(&batch_call_back_buffer->mutex);
-
-                call_back_buffer->count++;
-                call_back_buffer->err = 12;
-
-                delete rowBuf;
-
-                continue;
-            }
-
-            if (!PyDict_Check(dict)) {
-                pthread_mutex_lock(&batch_call_back_buffer->mutex);
-                batch_call_back_buffer->errors++;
-                batch_call_back_buffer->count++;
-                pthread_mutex_unlock(&batch_call_back_buffer->mutex);
-
-                call_back_buffer->count++;
-                call_back_buffer->err = -1; // TODO BETTER
-
-                delete rowBuf;
-
-                continue;
-            }
+            // Must be dict
+            CHECK_BATCH_INNER_ERRNO(PyDict_Check(dict), -1); // TODO BETTER ERR
 
 
-            // Will be NULL if its out of bounds (and sets index error, not sure if that is good)
             // TODO can PyTuple_GetItem ever be the result of OOM? Not sure it says borrowed reference I would think not
-            // If so then this trick will result in a bug
-            PyObject *timestamp = NULL;
-            uint64_t timestamp_int = NULL;
             if (PyTuple_Size(tuple) > 3) {
                 timestamp = PyTuple_GetItem(tuple, 3); // Change to GETITEM?
             }
 
-            // Will be NULL if its out of bounds(and sets index error, not sure if that is good)
-            PyObject *is_wal = NULL;
-            bool is_wal_bool = true;
             if (PyTuple_Size(tuple) > 4) {
                 is_wal = PyTuple_GetItem(tuple, 4); // CHANGE TO GETITEM?
             }
 
-
             if (timestamp) {
                 if (timestamp != Py_None) {
-                    if (!PyInt_Check(timestamp)) {
-                        pthread_mutex_lock(&batch_call_back_buffer->mutex);
-                        batch_call_back_buffer->errors++;
-                        batch_call_back_buffer->count++;
-                        pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+                    // Must be int
+                    CHECK_BATCH_INNER_ERRNO(PyInt_Check(timestamp), -1); // TODO BETTER ERR
 
-                        call_back_buffer->count++;
-                        call_back_buffer->err = -1; // TODO BETTER
-
-                        delete rowBuf;
-
-                        continue;
-                    }
                     timestamp_int = PyInt_AsSsize_t(timestamp);
                 }
             }
 
             if (is_wal) {
                 if (is_wal != Py_None) {
-                    if (!PyObject_TypeCheck(is_wal, &PyBool_Type)) {
-                        pthread_mutex_lock(&batch_call_back_buffer->mutex);
-                        batch_call_back_buffer->errors++;
-                        batch_call_back_buffer->count++;
-                        pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+                    // is_wal must be boolean
+                    CHECK_BATCH_INNER_ERRNO(PyObject_TypeCheck(is_wal, &PyBool_Type), -1); // TODO BETTER ERR
 
-                        call_back_buffer->count++;
-                        call_back_buffer->err = -1; // TODO BETTER
-
-                        delete rowBuf;
-
-                        continue;
-                    }
                     if (!PyObject_IsTrue(is_wal)) {
                         is_wal_bool = false;
                     }
                 }
             }
 
-
-            hb_put_t hb_put = NULL;
-            // todo add timestamp
             err = make_put(self, rowBuf, row_key_char, dict, &hb_put, is_bufferable_bool, timestamp_int, is_wal_bool);
-            if (err != 0) {
-                pthread_mutex_lock(&batch_call_back_buffer->mutex);
-                batch_call_back_buffer->errors++;
-                batch_call_back_buffer->count++;
-                pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+            CHECK_BATCH_INNER(err == 0);
 
-                call_back_buffer->count++;
-                call_back_buffer->err = err;
-
-                hb_mutation_destroy(hb_put);
-
-                delete rowBuf;
-
-                continue;
-            }
             // The only time hb_mutation_send results in non-zero means the call back has NOT been invoked
             // So its safe and necessary to delete rowBuf
             err = hb_mutation_send(self->connection->client, (hb_mutation_t)hb_put, put_callback, call_back_buffer);
-            if (err != 0) {
-                pthread_mutex_lock(&batch_call_back_buffer->mutex);
-                batch_call_back_buffer->errors++;
-                batch_call_back_buffer->count++;
-                pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+            CHECK_BATCH_INNER(err == 0);
 
-                pthread_mutex_lock(&call_back_buffer->mutex);
-                call_back_buffer->count++;
-                if (call_back_buffer->err == 0) {
-                    call_back_buffer->err = err;
-                }
-                pthread_mutex_unlock(&call_back_buffer->mutex);
-
-                delete rowBuf;
-
-                hb_mutation_destroy((hb_mutation_t) hb_put);
-
-                continue;
-            }
 
         } else if (strcmp(mutation_type_char, "delete") == 0) {
 
-            hb_delete_t hb_delete = NULL;
-
-            PyObject *columns = NULL;
             if (PyTuple_Size(tuple) > 2) {
                 columns = PyTuple_GetItem(tuple, 2);
             }
 
-            // Will return NULL if out of bounds (and sets type exception)
             // TODO can PyTuple_GetItem ever be the result of OOM? Not sure it says borrowed reference I would think not
-            // If so then this trick will result in a bug
-            PyObject *timestamp = NULL;
-            uint64_t timestamp_int = NULL;
             if (PyTuple_Size(tuple) > 3) {
-                timestamp = PyTuple_GetItem(tuple, 3); // CHANGE TO GETITEM
+                timestamp = PyTuple_GetItem(tuple, 3); // TODO CHANGE TO GETITEM
             }
 
             // Will return NULL if out of bounds (and sets type exception)
-            PyObject *is_wal = NULL;
-            bool is_wal_bool = true;
             if (PyTuple_Size(tuple) > 4) {
-                is_wal = PyTuple_GetItem(tuple, 4); // CHANGE TO GETITEM
+                is_wal = PyTuple_GetItem(tuple, 4); // TODO CHANGE TO GETITEM
             }
-
 
             // TODO DO I NEED TO DECREF TIMESTAMP AND IS_WAL
 
             if (timestamp) {
                 if (timestamp != Py_None) {
-                    if (!PyInt_Check(timestamp)) {
-                        pthread_mutex_lock(&batch_call_back_buffer->mutex);
-                        batch_call_back_buffer->errors++;
-                        batch_call_back_buffer->count++;
-                        pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+                    // Timestamp must be int
+                    CHECK_BATCH_INNER_ERRNO(PyInt_Check(timestamp), -1); // TODO BETTER ERRNO
 
-                        call_back_buffer->count++;
-                        call_back_buffer->err = -1; // TODO BETTER
-
-                        delete rowBuf;
-
-                        continue;
-                    }
                     timestamp_int = PyInt_AsSsize_t(timestamp);
                 }
             }
             if (is_wal) {
                 if (is_wal != Py_None) {
-                    if (!PyObject_TypeCheck(is_wal, &PyBool_Type)) {
-                        pthread_mutex_lock(&batch_call_back_buffer->mutex);
-                        batch_call_back_buffer->errors++;
-                        batch_call_back_buffer->count++;
-                        pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+                    CHECK_BATCH_INNER_ERRNO(PyObject_TypeCheck(is_wal, &PyBool_Type), -1); // TODO BETTER ERRNO
 
-                        call_back_buffer->count++;
-                        call_back_buffer->err = -1; // TODO BETTER
-
-                        delete rowBuf;
-
-                        continue;
-                    }
                     if (!PyObject_IsTrue(is_wal)) {
                         is_wal_bool = false;
                     }
@@ -3065,76 +2870,44 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
             }
 
             err = make_delete(self, row_key_char, &hb_delete, timestamp_int, is_wal_bool);
-            if (err != 0) {
-                pthread_mutex_lock(&batch_call_back_buffer->mutex);
-                batch_call_back_buffer->errors++;
-                batch_call_back_buffer->count++;
-                pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+            // TODO Do I need to intercept err and change it?
+            CHECK_BATCH_INNER(err == 0);
 
-                call_back_buffer->count++;
-                call_back_buffer->err = err;
-
-                delete rowBuf;
-
-                hb_mutation_destroy((hb_mutation_t) hb_delete);
-
-                continue;
-            }
-
-            add_columns_type add_columns_t = ADD_COLUMN_DELETE;
-            err = row_add_columns(columns, &hb_delete, rowBuf, add_columns_t, timestamp_int);
-            if (err != 0) {
-                pthread_mutex_lock(&batch_call_back_buffer->mutex);
-                batch_call_back_buffer->errors++;
-                batch_call_back_buffer->count++;
-                pthread_mutex_unlock(&batch_call_back_buffer->mutex);
-
-                call_back_buffer->count++;
-                call_back_buffer->err = err;
-
-                delete rowBuf;
-
-                hb_mutation_destroy((hb_mutation_t) hb_delete);
-
-                continue;
-            }
+            err = row_add_columns(columns, &hb_delete, rowBuf, add_columns_to_delete, timestamp_int);
+            // TODO Do I need to intercept err and change it?
+            CHECK_BATCH_INNER(err == 0);
 
             // If err is nonzero, call back has NOT been invoked
             err = hb_mutation_send(self->connection->client, (hb_mutation_t)hb_delete, delete_callback, call_back_buffer);
-            if (err != 0) {
-                // Do I need to destroy the mutation if send fails?
-                pthread_mutex_lock(&batch_call_back_buffer->mutex);
-                batch_call_back_buffer->errors++;
-                batch_call_back_buffer->count++;
-                pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+            CHECK_BATCH_INNER(err == 0);
 
-                pthread_mutex_lock(&call_back_buffer->mutex);
-                call_back_buffer->count++;
-                if (call_back_buffer->err == 0) {
-                    call_back_buffer->err = err;
-                }
-                pthread_mutex_unlock(&call_back_buffer->mutex);
-
-                delete rowBuf;
-
-                hb_mutation_destroy((hb_mutation_t) hb_delete);
-
-                continue;
-            }
         } else {
             // Must be put or delete
-            pthread_mutex_lock(&batch_call_back_buffer->mutex);
-            batch_call_back_buffer->errors++;
-            batch_call_back_buffer->count++;
-            pthread_mutex_unlock(&batch_call_back_buffer->mutex);
-
-            call_back_buffer->count++;
-            call_back_buffer->err = -1; //TODO BETTER
-
-            delete rowBuf;
-
-            continue;
+            CHECK_BATCH_INNER_ERRNO(0, -1); // TODO BETTER
         }
+        continue;
+
+inner_loop_error:
+
+        pthread_mutex_lock(&batch_call_back_buffer->mutex);
+        batch_call_back_buffer->errors++;
+        batch_call_back_buffer->count++;
+        pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+
+        //pthread_mutex_lock(&call_back_buffer->mutex);
+        if (call_back_buffer) {
+            call_back_buffer->count++;
+            // Note that the macro can set the err if required
+            call_back_buffer->err = err;
+        }
+        //pthread_mutex_unlock(&call_back_buffer->mutex);
+
+        if (rowBuf) delete rowBuf;
+
+        if (hb_put) hb_mutation_destroy((hb_mutation_t) hb_put);
+        if (hb_delete) hb_mutation_destroy((hb_mutation_t) hb_delete);
+
+        continue;
     }
 
     if (number_of_actions > 0) {
