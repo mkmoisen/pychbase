@@ -1307,7 +1307,7 @@ static int row_add_columns(PyObject *columns, void *get, RowBuffer *row_buff, ad
                         break;
                     case ADD_COLUMN_DELETE:
                         if (!timestamp) {
-                            // TODO this only works for MapR
+                            // TODO this only works for MapR? Or maybe HBASE_LATEST_TIMESTAMP works for both, but the documentation says to use the UINT64MAX thing or -1
                             timestamp = HBASE_LATEST_TIMESTAMP;
                         }
                         err = hb_delete_add_column(*((hb_delete_t *) get), (byte_t *) family, strlen(family), (byte_t *) qualifier, qualifier_len, timestamp);
@@ -2475,6 +2475,28 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
         return PyErr_NoMemory();
     }
 
+    add_columns_type add_columns_t = ADD_COLUMN_DELETE;
+    err = row_add_columns(columns, &hb_delete, row_buf, add_columns_t, timestamp_int);
+    if (err != 0) {
+        hb_mutation_destroy((hb_mutation_t) hb_delete);
+        delete row_buf;
+        delete call_back_buffer;
+        if (err == 13) {
+            return PyErr_NoMemory();
+        }
+        if (err == -2) {
+            PyErr_SetString(PyExc_TypeError, "columns must be list-like object\n");
+        } else if (err == -3) {
+            PyErr_SetString(PyExc_TypeError, "columns must be a list-like object, not a string\n");
+        } else if (err == -10) {
+            PyErr_SetString(HBaseError, "pychbase has a severe bug for row_add_columns method; bad type\n");
+        } else {
+            // hb_get_add_column failed, probably a bug in pychbase code or libhbase
+            PyErr_Format(HBaseError, "Failed to add column to get: %i\n", err);
+        }
+        return NULL;
+    }
+
     // If err is not 0, callback has not been invoked
     err = hb_mutation_send(self->connection->client, (hb_mutation_t)hb_delete, delete_callback, call_back_buffer);
     if (err != 0) {
@@ -2505,7 +2527,11 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
     delete call_back_buffer;
 
     if (err != 0) {
-        PyErr_Format(HBaseError, "Delete may have failed: %i", err);
+        if (err == 2) {
+            PyErr_Format(PyExc_ValueError, "Delete failed, probably bad column family\n");
+        } else {
+            PyErr_Format(HBaseError, "Delete failed due to unknown error: %i", err);
+        }
         return NULL;
     }
 

@@ -722,6 +722,71 @@ class TestCTableDelete(unittest.TestCase):
         self.assertRaises(ValueError, self.table.delete, '')
 
 
+class TestCTableDeleteColumns(unittest.TestCase):
+    def setUp(self):
+        self.connection = _connection(ZOOKEEPERS)
+
+
+    def tearDown(self):
+        try:
+            self.connection.delete_table(TABLE_NAME)
+        except ValueError:
+            pass
+        self.connection.close()
+
+    def test_happy(self):
+        self.connection.create_table(TABLE_NAME, {'f': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+        self.table.put("foo", {"f:a": "foo", 'f:ab': 'bar', 'f:abc': 'baz'})
+        row = self.table.row('foo')
+        self.assertEquals(row, {"f:a": "foo", 'f:ab': 'bar', 'f:abc': 'baz'})
+
+        self.table.delete('foo', ('f',))
+        row = self.table.row('foo')
+        self.assertEquals(row, {})
+
+        self.table.put("foo", {"f:a": "foo", 'f:ab': 'bar', 'f:abc': 'baz'})
+        self.table.delete('foo', ('f:',))
+        row = self.table.row('foo')
+        self.assertEquals(row, {})
+
+        self.table.put("foo", {"f:a": "foo", 'f:ab': 'bar', 'f:abc': 'baz'})
+        self.table.delete('foo', ('f:a',))
+        row = self.table.row('foo')
+        self.assertEquals(row, {'f:ab': 'bar', 'f:abc': 'baz'})
+
+        self.table.put("foo", {"f:a": "foo", 'f:ab': 'bar', 'f:abc': 'baz'})
+        self.table.delete('foo', ('f:a', 'f:ab'))
+        row = self.table.row('foo')
+        self.assertEquals(row, {'f:abc': 'baz'})
+
+        self.table.put("foo", {"f:a": "foo", 'f:ab': 'bar', 'f:abc': 'baz'})
+        self.table.delete('foo', ('f:a', 'f:ab', 'f:abc'))
+        row = self.table.row('foo')
+        self.assertEquals(row, {})
+
+        self.table.put("foo", {"f:a": "foo", 'f:ab': 'bar', 'f:abc': 'baz'})
+        self.table.delete('foo', ('f:nope',))
+        row = self.table.row('foo')
+        self.assertEquals(row, {"f:a": "foo", 'f:ab': 'bar', 'f:abc': 'baz'})
+
+        self.table.put("foo", {"f:a": "foo", 'f:ab': 'bar', 'f:abc': 'baz'})
+        self.table.delete('foo', ('f:a', 'f:nope'))
+        row = self.table.row('foo')
+        self.assertEquals(row, {'f:ab': 'bar', 'f:abc': 'baz'})
+
+    def test_type(self):
+        self.connection.create_table(TABLE_NAME, {'f': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+        self.assertRaises(TypeError, self.table.delete, 'foo', 'bar')
+        self.assertRaises(TypeError, self.table.delete, 'foo', {'set', 'should', 'fail'})
+        self.assertRaises(TypeError, self.table.delete, 'foo', {'dict': 'should', 'also': 'fail'})
+
+    def test_bad_column_family(self):
+        self.connection.create_table(TABLE_NAME, {'f': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+        self.assertRaises(ValueError, self.table.delete, 'foo', ('b',))
+
 class TestCTableScanStartStop(unittest.TestCase):
     def setUp(self):
         self.connection = _connection(ZOOKEEPERS)
