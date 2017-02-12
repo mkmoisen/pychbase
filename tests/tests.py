@@ -775,6 +775,116 @@ class TestCTableDeleteColumns(unittest.TestCase):
         row = self.table.row('foo')
         self.assertEquals(row, {'f:ab': 'bar', 'f:abc': 'baz'})
 
+    def test_batch_delete_columns_happy(self):
+        self.connection.create_table(TABLE_NAME, {'f': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+        for i in range(10):
+            self.table.put('foo%i' % i, {'f:a': 'foo%i' % i, 'f:ab': 'bar%i' % i, 'f:abc': 'baz%i' % i})
+
+        self.table.batch([('delete', 'foo%i' % i, ('f',)) for i in range(10)])
+        i = 0
+        for row, data in self.table.scan():
+            i += 1
+        self.assertEquals(i, 0)
+
+        for i in range(10):
+            self.table.put('foo%i' % i, {'f:a': 'foo%i' % i, 'f:ab': 'bar%i' % i, 'f:abc': 'baz%i' % i})
+
+        self.table.batch([('delete', 'foo%i' % i, ('f:',)) for i in range(10)])
+        i = 0
+        for row, data in self.table.scan():
+            i += 1
+        self.assertEquals(i, 0)
+
+        for i in range(10):
+            self.table.put('foo%i' % i, {'f:a': 'foo%i' % i, 'f:ab': 'bar%i' % i, 'f:abc': 'baz%i' % i})
+
+        self.table.batch([('delete', 'foo%i' % i, ('f:a',)) for i in range(10)])
+
+        i = 0
+        for row, data in self.table.scan():
+            self.assertEquals(data, {'f:ab': 'bar%i' % i, 'f:abc': 'baz%i' % i})
+            i += 1
+        self.assertEquals(i, 10)
+
+
+    def test_batch_delete_columns_timestamp(self):
+        self.connection.create_table(TABLE_NAME, {'f': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+        for i in range(10):
+            self.table.put('foo%i' % i, {'f:a': 'foo%i' % i, 'f:ab': 'foo%i' % i, 'f:abc': 'foo%i' % i}, 5)
+
+        for i in range(10):
+            self.table.put('foo%i' % i, {'f:a': 'bar%i' % i, 'f:ab': 'bar%i' % i, 'f:abc': 'bar%i' % i}, 10)
+
+        for i in range(10):
+            self.table.put('foo%i' % i, {'f:a': 'baz%i' % i, 'f:ab': 'baz%i' % i, 'f:abc': 'baz%i' % i}, 15)
+
+        self.table.batch([('delete', 'foo%i' % i, ('f:a',), 10) for i in range(10)])
+
+        i = 0
+        for row, data in self.table.scan('', '', None, None, 10, True):
+            self.assertEquals(data, {'f:ab': ('bar%i' % i, 10), 'f:abc': ('bar%i' % i, 10)})
+            i += 1
+
+        self.assertEquals(i, 10)
+
+        i = 0
+        for row, data in self.table.scan('', '', None, None, 15, True):
+            self.assertEquals(data, {'f:a': ('baz%i' % i, 15), 'f:ab': ('baz%i' % i, 15), 'f:abc': ('baz%i' % i, 15)})
+            i += 1
+        self.assertEquals(i, 10)
+
+
+    def test_no_timestamp(self):
+        self.connection.create_table(TABLE_NAME, {'f': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+        self.table.put("foo", {"f:a": "foo", 'f:ab': 'bar', 'f:abc': 'baz'}, 5)
+        self.table.put("foo", {"f:a": "FOO", 'f:ab': 'BAR', 'f:abc': 'BAZ'}, 10)
+
+        self.table.delete('foo', ('f',))
+        row = self.table.row('foo')
+        self.assertEquals(row, {})
+
+        row = self.table.row('foo', None, 10)
+        self.assertEquals(row, {})
+
+        row = self.table.row('foo', None, 5)
+        self.assertEquals(row, {})
+
+    def test_with_timestamp(self):
+        self.connection.create_table(TABLE_NAME, {'f': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+        self.table.put("foo", {"f:a": "foo", 'f:ab': 'bar', 'f:abc': 'baz'}, 5)
+        self.table.put("foo", {"f:a": "FOO", 'f:ab': 'BAR', 'f:abc': 'BAZ'}, 10)
+        self.table.delete('foo', ('f',), 10)
+
+        row = self.table.row('foo')
+        self.assertEquals(row, {})
+
+        row = self.table.row('foo', None, 10)
+        self.assertEquals(row, {})
+
+        row = self.table.row('foo', None, 5)
+        self.assertEquals(row, {})
+
+    def test_with_timestamp_1(self):
+        self.connection.create_table(TABLE_NAME, {'f': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+        self.table.put("foo", {"f:a": "foo", 'f:ab': 'bar', 'f:abc': 'baz'}, 5)
+        self.table.put("foo", {"f:a": "FOO", 'f:ab': 'BAR', 'f:abc': 'BAZ'}, 10)
+        self.table.delete('foo', ('f',), 5)
+
+        row = self.table.row('foo')
+        self.assertEquals(row,  {"f:a": "FOO", 'f:ab': 'BAR', 'f:abc': 'BAZ'})
+
+        row = self.table.row('foo', None, 10)
+        self.assertEquals(row,  {"f:a": "FOO", 'f:ab': 'BAR', 'f:abc': 'BAZ'})
+
+        row = self.table.row('foo', None, 5)
+        self.assertEquals(row, {})
+
+
     def test_type(self):
         self.connection.create_table(TABLE_NAME, {'f': {}})
         self.table = _table(self.connection, TABLE_NAME)
@@ -1098,6 +1208,23 @@ class TestCTableBatch(unittest.TestCase):
 
         errors, results = self.table.batch([('delete', 'a', None, None, 'invalid')])
         self.assertEquals(errors, 1)
+
+    def test_delete_columns_type(self):
+        errors, results = self.table.batch([('delete', 'a', None)])
+        self.assertEquals(errors, 0)
+
+        errors, results = self.table.batch([('delete', 'a', ('f',))])
+        self.assertEquals(errors, 0)
+
+        errors, results = self.table.batch([('delete', 'a', 'invalid')])
+        self.assertEquals(errors, 1)
+
+        errors, results = self.table.batch([('delete', 'a', {'no', 'sets'})])
+        self.assertEquals(errors, 1)
+
+        errors, results = self.table.batch([('delete', 'a', {'no': 'dicts'})])
+        self.assertEquals(errors, 1)
+
 
 
 

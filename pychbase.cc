@@ -2910,8 +2910,12 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
         } else if (strcmp(mutation_type_char, "delete") == 0) {
 
-            // TODO add columns PyTuple_GetItem(tuple, 2)
             hb_delete_t hb_delete = NULL;
+
+            PyObject *columns = NULL;
+            if (PyTuple_Size(tuple) > 2) {
+                columns = PyTuple_GetItem(tuple, 2);
+            }
 
             // Will return NULL if out of bounds (and sets type exception)
             // TODO can PyTuple_GetItem ever be the result of OOM? Not sure it says borrowed reference I would think not
@@ -2987,6 +2991,25 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
                 continue;
             }
+
+            add_columns_type add_columns_t = ADD_COLUMN_DELETE;
+            err = row_add_columns(columns, &hb_delete, rowBuf, add_columns_t, timestamp_int);
+            if (err != 0) {
+                pthread_mutex_lock(&batch_call_back_buffer->mutex);
+                batch_call_back_buffer->errors++;
+                batch_call_back_buffer->count++;
+                pthread_mutex_unlock(&batch_call_back_buffer->mutex);
+
+                call_back_buffer->count++;
+                call_back_buffer->err = err;
+
+                delete rowBuf;
+
+                hb_mutation_destroy((hb_mutation_t) hb_delete);
+
+                continue;
+            }
+
             // If err is nonzero, call back has NOT been invoked
             err = hb_mutation_send(self->connection->client, (hb_mutation_t)hb_delete, delete_callback, call_back_buffer);
             if (err != 0) {
