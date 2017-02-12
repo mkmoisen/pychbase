@@ -1484,67 +1484,31 @@ void client_flush_callback(int32_t err, hb_client_t client, void *ctx) {
 * or else it will result in a memory leak
 */
 void put_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result_t result, void *extra) {
-    // TODO hb_mutation_set_bufferable
-    /*
-
-    http://tsunanet.net/~tsuna/asynchbase/api/org/hbase/async/PutRequest.html#setBufferable(boolean)
-    Sets whether or not this RPC is can be buffered on the client side. The default is true.
-
-    Setting this to false bypasses the client-side buffering, which is used to send RPCs in batches for greater throughput, and causes this RPC to be sent directly to the server.
-
-    Parameters:
-    bufferable - Whether or not this RPC can be buffered (i.e. delayed) before being sent out to HBase.
-
-     * Sets whether or not this RPC can be buffered on the client side.
-     *
-     * Currently only puts and deletes can be buffered. Calling this for
-     * any other mutation type will return EINVAL.
-     *
-     * The default is true.
-
-    HBASE_API int32_t
-    hb_mutation_set_bufferable(
-        hb_mutation_t mutation,
-        const bool bufferable);
-
+     /*
      TODO it looks to me like setting bufferable to true doesn't do anything at all
      Batching 1 million records takes just as long when its buffered and when its not
      Either I'm doing something wrong, libhbase is doing something wrong, or perhaps it just doesn't work on MapR?
      In the event that buffering starts working, I need to change some of my frees or else I'll hit mem leak/segfaults
      */
 
-
-
-
     // TODO Dont error check this or else it will hang forever
     CallBackBuffer *call_back_buffer = (CallBackBuffer *) extra;
 
-    if (err != 0) {
-        pthread_mutex_lock(&call_back_buffer->mutex);
-        call_back_buffer->count = 1;
-        call_back_buffer->err = err;
-        delete call_back_buffer->rowBuf;
-        if (call_back_buffer->batch_call_back_buffer) {
-            pthread_mutex_lock(&call_back_buffer->batch_call_back_buffer->mutex);
-            call_back_buffer->batch_call_back_buffer->errors++;
-            call_back_buffer->batch_call_back_buffer->count++;
-            pthread_mutex_unlock(&call_back_buffer->batch_call_back_buffer->mutex);
-        }
-        pthread_mutex_unlock(&call_back_buffer->mutex);
-
-        hb_mutation_destroy(mutation);
-
-        return;
-    }
-
-
-    // It looks like result is always NULL for put?
 
     pthread_mutex_lock(&call_back_buffer->mutex);
+
     call_back_buffer->count = 1;
+    if (err != 0) {
+        call_back_buffer->err = err;
+    }
+
     delete call_back_buffer->rowBuf;
+
     if (call_back_buffer->batch_call_back_buffer) {
         pthread_mutex_lock(&call_back_buffer->batch_call_back_buffer->mutex);
+        if (err != 0) {
+            call_back_buffer->batch_call_back_buffer->errors++;
+        }
         call_back_buffer->batch_call_back_buffer->count++;
         pthread_mutex_unlock(&call_back_buffer->batch_call_back_buffer->mutex);
     }
@@ -1552,7 +1516,10 @@ void put_callback(int err, hb_client_t client, hb_mutation_t mutation, hb_result
 
     hb_mutation_destroy(mutation);
 
+    return;
+
 }
+
 
 /*
 * Returns 0 on success
