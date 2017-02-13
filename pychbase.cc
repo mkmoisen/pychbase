@@ -533,7 +533,7 @@ struct CallBackBuffer {
     pthread_mutex_t mutex;
     BatchCallBackBuffer *batch_call_back_buffer;
     bool include_timestamp;
-    bool scan_include_data;
+    bool only_rowkeys; // Used in scan call back to only return rowkeys
     //PyObject *rets;
     // TODO I don't require the Table *t anymore right?
     CallBackBuffer(RowBuffer *r, BatchCallBackBuffer *bcbb) {
@@ -543,8 +543,7 @@ struct CallBackBuffer {
         batch_call_back_buffer = bcbb;
         mutex = PTHREAD_MUTEX_INITIALIZER;
         ret = NULL;
-        include_timestamp = false;
-        scan_include_data = true; // Set to false to only retrieve row key
+        only_rowkeys = false; // Set to true to only retrieve row key
     }
     ~CallBackBuffer() {
         /*
@@ -2022,7 +2021,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 return;
             }
 
-            if (call_back_buffer->scan_include_data) {
+            if (!call_back_buffer->only_rowkeys) {
 
                 // Do I need a null check?
                 dict = PyDict_New();
@@ -2085,7 +2084,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
             strncpy(key_char, (char *)key, keyLen);
             key_char[keyLen] = '\0';
 
-            if (call_back_buffer->scan_include_data) {
+            if (!call_back_buffer->only_rowkeys) {
                 tuple = Py_BuildValue("sO",(char *)key_char, dict);
                 free(key_char);
 
@@ -2109,7 +2108,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
             // I can't imagine this lock being necessary
             // However the helgrind report went from 24000 lines to 3500 after adding it?
             pthread_mutex_lock(&call_back_buffer->mutex);
-            if (call_back_buffer->scan_include_data) {
+            if (!call_back_buffer->only_rowkeys) {
                 err = PyList_Append(call_back_buffer->ret, tuple);
             } else {
                 // TODO Do I need to check for errors and decryef on Py_BuildValue string?
@@ -2125,7 +2124,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
 
                 // TODO If I decref this will i seg fault if i access it later?
                 // Should itb e set to a none?
-                if (call_back_buffer->scan_include_data) {
+                if (!call_back_buffer->only_rowkeys) {
                     Py_DECREF(tuple);
                 }
 
@@ -2136,7 +2135,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 return;
             }
 
-            if (call_back_buffer->scan_include_data) {
+            if (!call_back_buffer->only_rowkeys) {
                 Py_DECREF(tuple);
             }
 
@@ -2182,7 +2181,7 @@ table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testIntera
 table.scan('hello', 'hello100~')
 */
 
-static PyObject *Table_scan(Table *self, PyObject *args) {
+static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
     int err = 0;
 
     char *start = "";
@@ -2193,6 +2192,8 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
     uint64_t timestamp_int = NULL;
     PyObject *include_timestamp = NULL;
     bool include_timestamp_bool = false;
+    PyObject *only_rowkeys = NULL;
+    bool only_rowkeys_bool = false;
 
 
     hb_scanner_t scan = NULL;
@@ -2203,9 +2204,13 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
     add_columns_type add_columns_to_scan = ADD_COLUMN_SCAN;
     PyObject *ret = NULL;
 
-    if (!PyArg_ParseTuple(args, "|ssOOOO", &start, &stop, &columns, &filter, &timestamp, &include_timestamp)) {
+    static char *kwlist[] = {"start", "stop", "columns", "filter", "timestamp", "include_timestamp", "only_rowkeys", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|ssOOOOO", kwlist, &start, &stop, &columns, &filter, &timestamp, &include_timestamp, &only_rowkeys)) {
         return NULL;
     }
+    //if (!PyArg_ParseTuple(args, "|ssOOOO", &start, &stop, &columns, &filter, &timestamp, &include_timestamp)) {
+    //    return NULL;
+    //}
 
     if (timestamp) {
         if (timestamp != Py_None) {
@@ -2225,6 +2230,18 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
             }
             if (PyObject_IsTrue(include_timestamp)) {
                 include_timestamp_bool = true;
+            }
+        }
+    }
+
+    if (only_rowkeys) {
+        if (only_rowkeys != Py_None) {
+            if (!PyObject_TypeCheck(only_rowkeys, &PyBool_Type)) {
+                PyErr_SetString(PyExc_TypeError, "only_rowkeys must be boolean\n");
+                return NULL;
+            }
+            if (PyObject_IsTrue(only_rowkeys)) {
+                only_rowkeys_bool = true;
             }
         }
     }
@@ -2272,6 +2289,7 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
     CHECK_MEM_EXC(call_back_buffer);
 
     call_back_buffer->include_timestamp = include_timestamp_bool;
+    call_back_buffer->only_rowkeys = only_rowkeys_bool;
 
     call_back_buffer->ret = PyList_New(0);
     CHECK_MEM_EXC(call_back_buffer->ret);
@@ -2315,23 +2333,7 @@ error:
     return NULL;
 }
 
-/*
-void PyObject *Table_delete_prefix(Table *self, PyObject *args) {
-    char *row_key_start;
-    char *row_key_stop;
-    PyObject *table_scan_args = NULL;
-    if (!PyArg_ParseTuple(args, "s", &row_key_start)) {
-        return NULL;
-    }
 
-    // row_key_stop = row_key_start + "~";
-    // table_scan_args = Py_BuildValue("(ss") null null rowkeys_only=true);
-    //PyObject row_keys = Table_scan(self, table_scan_args);
-    // Convert to batch
-
-    Py_RETURN_NONE;
-}
-*/
 
 /*
 * It's very important to delete the RowBuf in all possible cases in this call back
@@ -2871,12 +2873,65 @@ error:
 }
 
 
+
+static PyObject *Table_delete_prefix(Table *self, PyObject *args) {
+    int err;
+    char *row_key_start = "";
+    char *row_key_stop;
+    PyObject *table_scan_args = NULL;
+    if (!PyArg_ParseTuple(args, "s", &row_key_start)) {
+        return NULL;
+    }
+
+    if (strcmp(row_key_start, "") == 0) {
+        PyErr_SetString(PyExc_ValueError, "row_key_start cannot be empty\n");
+        return NULL;
+    }
+
+    row_key_stop = (char *) malloc(sizeof(char) * (strlen(row_key_start) + 1 + 1)); // 1 for ~ 1 for \0
+    err = snprintf(row_key_stop, sizeof(row_key_stop), "%s~", row_key_start);
+    printf("err was %i\n", err);
+    printf("row_key_stop is %s\n", row_key_stop);
+
+    PyObject *dict = PyDict_New();
+    PyDict_SetItem(dict, Py_BuildValue("s", "start"), Py_BuildValue("s", row_key_start));
+    PyDict_SetItem(dict, Py_BuildValue("s", "stop"), Py_BuildValue("s", row_key_stop));
+    PyDict_SetItem(dict, Py_BuildValue("s", "only_rowkeys"), Py_True);
+    printf("before calling table_scan\n");
+    PyObject *tuple = PyTuple_New(0);
+    PyObject *row_keys = Table_scan(self, tuple, dict);
+    printf("after calling table_scan\n");
+
+    for (Py_ssize_t i = 0; i < PyList_GET_SIZE(row_keys); i++) {
+        PyObject *row_key = PyList_GetItem(row_keys, i);
+        //Py_INCREF(row_key);
+        PyList_SetItem(row_keys, i, Py_BuildValue("(sO)", "delete", row_key));
+    }
+
+    // row_key_stop = row_key_start + "~";
+    // table_scan_args = Py_BuildValue("(ss") null null rowkeys_only=true);
+    //PyObject row_keys = Table_scan(self, table_scan_args);
+    // Convert to batch
+
+    PyObject *return_tuple = Table_batch(self, Py_BuildValue("(O)", row_keys));
+
+    printf("before free\n");
+    free(row_key_stop);
+
+    printf("before return\n");
+    //return row_keys;
+    //return row_keys;
+    return return_tuple;
+}
+
+
 static PyMethodDef Table_methods[] = {
     {"row", (PyCFunction) Table_row, METH_VARARGS, "Gets one row"},
     {"put", (PyCFunction) Table_put, METH_VARARGS, "Puts one row"},
-    {"scan", (PyCFunction) Table_scan, METH_VARARGS, "Scans the table"},
+    {"scan", (PyCFunction) Table_scan, METH_VARARGS | METH_KEYWORDS, "Scans the table"},
     {"delete", (PyCFunction) Table_delete, METH_VARARGS, "Deletes one row"},
     {"batch", (PyCFunction) Table_batch, METH_VARARGS, "sends a batch"},
+    {"delete_prefix", (PyCFunction) Table_delete_prefix, METH_VARARGS, "Deletes all rows with a given prefix"},
     {NULL}
 };
 
