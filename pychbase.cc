@@ -2194,6 +2194,7 @@ static PyObject *Table_scan(Table *self, PyObject *args) {
     PyObject *include_timestamp = NULL;
     bool include_timestamp_bool = false;
 
+
     hb_scanner_t scan = NULL;
     RowBuffer *row_buf = NULL;
     CallBackBuffer *call_back_buffer = NULL;
@@ -2331,6 +2332,7 @@ void PyObject *Table_delete_prefix(Table *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 */
+
 /*
 * It's very important to delete the RowBuf in all possible cases in this call back
 * or else it will result in a memory leak
