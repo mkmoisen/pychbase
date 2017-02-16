@@ -5,10 +5,10 @@ Currently in beta, `pychbase` is tested on Python 2.7 and MapR 5.1.
 
 # LD_LIBRARY_PATH
 
-To compile as well as import `pychbase`, your `LD_LIBRARY_PATH` must have the directory with libjvm.so on it, normally in either:
+To compile as well as import `pychbase`, your `LD_LIBRARY_PATH` must have the directory with `libjvm.so` on it, normally in either:
 
- * $JAVA_HOME/jre/lib/amd64/server
  * $JAVA_HOME/lib/amd64/server
+ * $JAVA_HOME/jre/lib/amd64/server
 
 If you are using this with MapR, you must also have `/opt/mapr/lib` on your `LD_LIBRARY_PATH`
 
@@ -17,57 +17,6 @@ E.g,
     export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$JAVA_HOME/jre/lib/amd64/server:/opt/mapr/lib
 
 # Installation
-
-Please note that the following environment variables must be set in order to install `pychbase` correctly:
-
- * PYCHBASE_IS_MAPR
- * PYCHBASE_LIBJVM_DIR
- * PYCHBASE_INCLUDE_DIR
- * PYCHBASE_LIBRARY_DIR
-
-## PYCHBASE_IS_MAPR
-
-This defaults to TRUE. IF you are using Cloudera/etc, make sure to:
-
-    export PYCHBASE_IS_MAPR=FALSE
-
-## PYCHBASE_LIBJVM_DIR
-
-This is the directory that houses the `libjvm.so` file. Normally it is in either:
-
- * $JAVA_HOME/lib/amd64/server
- * $JAVA_HOME/jre/lib/amd64/server
-
-If `PYCHBASE_LIBJVM_DIR` is not set, the installer will check if `JAVA_HOME` has been set, and then try each of the above directories.
-If `JAVA_HOME` is not set, it will attempt to default to `/usr/lib/jvm/jre-1.7.0/`
-
-Example:
-
-    export PYCHBASE_LIBJVM_DIR=/usr/lib/jvm/jre-1.7.0/lib/amd64/server
-
-## PYCHBASE_INCLUDE_DIR
-
-This houses the `/hbase/hbase.h` and other `libhbase` C header files.
-
-If `PYCHBASE_IS_MAPR` is true, this defaults to /opt/mapr/include.
-
-For Non-MapR environments, this must be set or the installation will fail.
-
-Example on Cloudera:
-
-    export PYCHBASE_INCLUDE_DIR=/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/include
-
-## PYCHBASE_LIBRARY_DIR
-
-This houses either the `libMapRClient.so` file on MapR environemnts, or the libhbase.so file on non-MapR environments.
-
-If `PYCHBASE_IS_MAPR` is true, this defaults to /opt/mapr/lib.
-
-For Non-MapR environments, this must be set or the installation will fail.
-
-Example on Cloudera:
-
-    export PYCHBASE_LIBRARY_DIR=/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/lib/native
 
 # Installation on a MapR environment
 
@@ -81,19 +30,9 @@ Normally, the only environment variable to worry about on a MapR environment is 
     source bin/activate
     pip install pychbase
 
-## Building from source
+# Installation on a Non-MapR environment
 
-    export PYCHBASE_LIBJVM_DIR=/usr/lib/jvm/jre-1.7.0/lib/amd64/server
-    virtualenv pychbase
-    cd pychbase
-    source bin/activate
-    git clone https://github.com/mkmoisen/pychbase.git
-    cd pychbase
-    python setup.py install
-
-# Installation on a non-MapR environment
-
-For non-MapR environments you have to worry about all the environment variables.
+For Non-MapR environments you have to worry about all the environment variables. Please check the end of this readme for the guide on these environment variables.
 
 ## Installation through Pip
 
@@ -105,19 +44,6 @@ For non-MapR environments you have to worry about all the environment variables.
     cd pychbase
     source bin/activate
     pip install pychbase
-
-## Building from source
-
-    export PYCHBASE_IS_MAPR=FALSE
-    export PYCHBASE_LIBJVM_DIR=/usr/lib/jvm/jre-1.7.0/lib/amd64/server
-    export PYCHBASE_INCLUDE_DIR=/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/include
-    export PYCHBASE_LIBRARY_DIR=/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/lib/native
-    virtualenv pychbase
-    cd pychbase
-    source bin/activate
-    git clone https://github.com/mkmoisen/pychbase.git
-    cd pychbase
-    python setup.py install
 
 # Run the tests
 
@@ -139,6 +65,10 @@ Currently `nosetests` will not work without facing an import issue.
 
 I have attempted to mimic the great HappyBase API somewhat.
 
+Make sure to set the LD_LIBRARY_PATH environment variable:
+
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$JAVA_HOME/jre/lib/amd64/server:/opt/mapr/lib
+
 Imports:
 
     from pychbase import Connection, Table, Batch
@@ -148,8 +78,8 @@ To create a connection:
     # On MapR, you don't need to specify the CLDBS/zookeepers:
     connection = Connection()
 
-    # On non-MapR environments, you'll need to specify the zookeepers:
-    connection = Connection('zookeeper-one:722,zookeeper-two:7222,zookeeper-three:7222')
+    # On Non-MapR environments, you'll need to specify the zookeepers:
+    connection = Connection('zookeeper-one:2181",zookeeper-two:2181",zookeeper-three:2181"')
 
 To create and delete tables:
 
@@ -157,7 +87,7 @@ To create and delete tables:
     connection.create_table('test_table', {'f': {}})
     connection.delete_table('test_table')
 
-To get a table to operate one:
+To get a table to operate on:
 
     table = connection.table('test_table')
 
@@ -166,6 +96,7 @@ To put, delete, and get from a table:
     table.put('rowkey1', {'f:foo': 'bar'})
     obj = table.row('rowkey1')
     assert obj == {'f:foo': 'bar'}
+
     table.delete('rowkey1')
     obj = table.row('rowkey1')
     assert obj == {}
@@ -178,6 +109,10 @@ To scan:
 
     # Scan with a start and stop:
     for row_key, obj in table.scan('foo', 'bar'):
+        pass
+
+    # Scan with a rowprefix:
+    for row_key, obj in table.scan('foo'): # E.g., start='foo', stop='foo~'
         pass
 
 To batch put:
@@ -221,6 +156,61 @@ One goal of this library is to maintain compatibility with the APIs in HappyBase
 Check out __init__.py to understand which features of HappyBase I have not yet implemented.
 
 In the future, I will force print warnings to stderr in the event a user uses an unimplemented feature.
+
+# Environment Variables Guide
+Please note that the following environment variables must be set in order to install `pychbase` correctly:
+
+ * PYCHBASE_IS_MAPR
+ * PYCHBASE_LIBJVM_DIR
+ * PYCHBASE_INCLUDE_DIR
+ * PYCHBASE_LIBRARY_DIR
+
+## PYCHBASE_IS_MAPR
+
+This defaults to `TRUE`. IF you are using Cloudera/etc, make sure to:
+
+    export PYCHBASE_IS_MAPR=FALSE
+
+## PYCHBASE_LIBJVM_DIR
+
+This is the directory that houses the `libjvm.so` file. Normally it is in either:
+
+ * $JAVA_HOME/lib/amd64/server
+ * $JAVA_HOME/jre/lib/amd64/server
+
+If `PYCHBASE_LIBJVM_DIR` is not set, the installer will check if `JAVA_HOME` has been set, and then try each of the above directories.
+If `JAVA_HOME` is not set, it will attempt to default to `/usr/lib/jvm/jre-1.7.0/`.
+
+Example:
+
+    export PYCHBASE_LIBJVM_DIR=/usr/lib/jvm/jre-1.7.0/lib/amd64/server
+
+## PYCHBASE_INCLUDE_DIR
+
+This houses the `/hbase/hbase.h` and other `libhbase` C header files.
+
+If `PYCHBASE_IS_MAPR` is true, this defaults to `/opt/mapr/include`.
+
+For Non-MapR environments, this must be set or the installation will fail.
+
+Example on Cloudera:
+
+    export PYCHBASE_INCLUDE_DIR=/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/include
+
+## PYCHBASE_LIBRARY_DIR
+
+This houses either the `libMapRClient.so` file on MapR environments, or the `libhbase.so` file on Non-MapR environments.
+
+If `PYCHBASE_IS_MAPR` is true, this defaults to `/opt/mapr/lib`.
+
+For Non-MapR environments, this must be set or the installation will fail.
+
+Example on Cloudera:
+
+    export PYCHBASE_LIBRARY_DIR=/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/lib/native
+
+# Author
+[Matthew Moisen](https://matthewmoisen.com)
 
 # License
 MIT
