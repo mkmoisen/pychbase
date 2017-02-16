@@ -20,11 +20,9 @@ E.g,
 
 # Installation
 
-# Installation on a MapR environment
+## Installation on a MapR environment
 
 Normally, the only environment variable to worry about on a MapR environment is $PYCHBASE_LIBJVM_DIR
-
-## Installation through Pip
 
     export PYCHBASE_LIBJVM_DIR=/usr/lib/jvm/jre-1.7.0/lib/amd64/server
     virtualenv pychbase
@@ -32,11 +30,14 @@ Normally, the only environment variable to worry about on a MapR environment is 
     source bin/activate
     pip install pychbase
 
-# Installation on a Non-MapR environment
+    # Or build it from source
+    git clone https://github.com/mkmoisen/pychbase.git
+    cd pychbase
+    python setup.py install
+
+## Installation on a Non-MapR environment
 
 For Non-MapR environments you have to worry about all the environment variables. Please check the end of this readme for the guide on these environment variables.
-
-## Installation through Pip
 
     export PYCHBASE_IS_MAPR=FALSE
     export PYCHBASE_LIBJVM_DIR=/usr/lib/jvm/jre-1.7.0/lib/amd64/server
@@ -46,6 +47,11 @@ For Non-MapR environments you have to worry about all the environment variables.
     cd pychbase
     source bin/activate
     pip install pychbase
+
+    # Or build it from source
+    git clone https://github.com/mkmoisen/pychbase.git
+    cd pychbase
+    python setup.py install
 
 # Run the tests
 
@@ -65,7 +71,7 @@ Currently `nosetests` will not work without facing an import issue.
 
 # Usage
 
-I have attempted to mimic the great HappyBase API somewhat.
+I have attempted to mimic the great HappyBase API as closely as possible.
 
 Make sure to set the LD_LIBRARY_PATH environment variable:
 
