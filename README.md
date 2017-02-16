@@ -16,17 +16,74 @@ E.g,
 
     export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$JAVA_HOME/jre/lib/amd64/server:/opt/mapr/lib
 
+# Installation
+
+Please note that the following environment variables must be set in order to install `pychbase` correctly:
+
+ * PYCHBASE_IS_MAPR
+ * PYCHBASE_LIBJVM_DIR
+ * PYCHBASE_INCLUDE_DIR
+ * PYCHBASE_LIBRARY_DIR
+
+## PYCHBASE_IS_MAPR
+
+This defaults to TRUE. IF you are using Cloudera/etc, make sure to:
+
+    export PYCHBASE_IS_MAPR=FALSE
+
+## PYCHBASE_LIBJVM_DIR
+
+This is the directory that houses the `libjvm.so` file. Normally it is in either:
+
+ * $JAVA_HOME/lib/amd64/server
+ * $JAVA_HOME/jre/lib/amd64/server
+
+If `PYCHBASE_LIBJVM_DIR` is not set, the installer will check if `JAVA_HOME` has been set, and then try each of the above directories.
+If `JAVA_HOME` is not set, it will attempt to default to `/usr/lib/jvm/jre-1.7.0/`
+
+Example:
+
+    export PYCHBASE_LIBJVM_DIR=/usr/lib/jvm/jre-1.7.0/lib/amd64/server
+
+## PYCHBASE_INCLUDE_DIR
+
+This houses the `/hbase/hbase.h` and other `libhbase` C header files.
+
+If `PYCHBASE_IS_MAPR` is true, this defaults to /opt/mapr/include.
+
+For Non-MapR environments, this must be set or the installation will fail.
+
+Example on Cloudera:
+
+    export PYCHBASE_INCLUDE_DIR=/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/include
+
+## PYCHBASE_LIBRARY_DIR
+
+This houses either the `libMapRClient.so` file on MapR environemnts, or the libhbase.so file on non-MapR environments.
+
+If `PYCHBASE_IS_MAPR` is true, this defaults to /opt/mapr/lib.
+
+For Non-MapR environments, this must be set or the installation will fail.
+
+Example on Cloudera:
+
+    export PYCHBASE_LIBRARY_DIR=/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/lib/native
+
 # Installation on a MapR environment
 
-You can install it through `pip` if you are using MapR. Note that it will build the C from source.
+Normally, the only environment variable to worry about on a MapR environment is $PYCHBASE_LIBJVM_DIR
 
+## Installation through Pip
+
+    export PYCHBASE_LIBJVM_DIR=/usr/lib/jvm/jre-1.7.0/lib/amd64/server
     virtualenv pychbase
     cd pychbase
     source bin/activate
     pip install pychbase
 
-Or you can build it from source like the following:
+## Building from source
 
+    export PYCHBASE_LIBJVM_DIR=/usr/lib/jvm/jre-1.7.0/lib/amd64/server
     virtualenv pychbase
     cd pychbase
     source bin/activate
@@ -36,18 +93,31 @@ Or you can build it from source like the following:
 
 # Installation on a non-MapR environment
 
-Currently, `pip` will only work if you are on a MapR environment. Otherwise, it will fail.
+For non-MapR environments you have to worry about all the environment variables.
 
-The current `setup.py` script assumes a MapR environment. If you are not on MapR, you'll have to remove the mentions of MapR in the setup.py file, notably these strings:
+## Installation through Pip
 
-    '/opt/mapr/include'
-    'MapRClient'
-    '/opt/mapr/lib'
+    export PYCHBASE_IS_MAPR=FALSE
+    export PYCHBASE_LIBJVM_DIR=/usr/lib/jvm/jre-1.7.0/lib/amd64/server
+    export PYCHBASE_INCLUDE_DIR=/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/include
+    export PYCHBASE_LIBRARY_DIR=/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/lib/native
+    virtualenv pychbase
+    cd pychbase
+    source bin/activate
+    pip install pychbase
 
-However, you will need to hunt down the location of the `hbase.h` file that has hopefully been included with your distribution.
-I haven't yet had a chance to download Cloudera or Horton works and test it out. If you try it and get it working, please raise an issue on Github and I will add it to this readme.
+## Building from source
 
-Once you find the directory for `hbase.h`, replace the `/opt/mapr/include` in `setup.py` with that directory
+    export PYCHBASE_IS_MAPR=FALSE
+    export PYCHBASE_LIBJVM_DIR=/usr/lib/jvm/jre-1.7.0/lib/amd64/server
+    export PYCHBASE_INCLUDE_DIR=/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/include
+    export PYCHBASE_LIBRARY_DIR=/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/lib/native
+    virtualenv pychbase
+    cd pychbase
+    source bin/activate
+    git clone https://github.com/mkmoisen/pychbase.git
+    cd pychbase
+    python setup.py install
 
 # Run the tests
 
