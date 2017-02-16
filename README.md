@@ -120,7 +120,7 @@ To scan:
         pass
 
     # Scan with a rowprefix:
-    for row_key, obj in table.scan('foo'): # E.g., start='foo', stop='foo~'
+    for row_key, obj in table.scan(row_prefix='baz'): # E.g., start='baz', stop='baz~'
         pass
 
 To batch put:
