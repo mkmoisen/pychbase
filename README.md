@@ -1,6 +1,8 @@
 # pychbase
 This is a Python C wrapper for HBase using the [libhbase C API](https://github.com/mapr/libhbase).
 
+`pychbase` is modeled after the `happybase` API, but it does not use `thrift`, and is ideal for `MapRDB`.
+
 Currently in beta, `pychbase` is tested on Python 2.7 and MapR 5.1.
 
 # LD_LIBRARY_PATH
