@@ -119,7 +119,7 @@ To scan:
     for row_key, obj in table.scan('foo', 'bar'):
         pass
 
-    # Scan with a rowprefix:
+    # Scan with a row prefix:
     for row_key, obj in table.scan(row_prefix='baz'): # E.g., start='baz', stop='baz~'
         pass
 
