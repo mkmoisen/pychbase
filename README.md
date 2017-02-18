@@ -1,7 +1,7 @@
 # pychbase
-This is a Python C wrapper for HBase using the [libhbase C API](https://github.com/mapr/libhbase).
+This is a Python C wrapper for HBase and MapRDB using the [libhbase C API](https://github.com/mapr/libhbase).
 
-`pychbase` is modeled after the `happybase` API, but it does not use `thrift`, and is ideal for `MapRDB`.
+`pychbase` is modeled after the HappyBase API, but it does not use `thrift`, and is ideal for MapRDB.
 
 Currently in beta, `pychbase` is tested on Python 2.7 and MapR 5.1.
 
@@ -39,6 +39,8 @@ Normally, the only environment variable to worry about on a MapR environment is 
 
 For Non-MapR environments you have to worry about all the environment variables. Please check the end of this readme for the guide on these environment variables.
 
+Note that I haven't yet tested it on Cloudera, and I wasn't able to get the jars/classpath working
+
     export PYCHBASE_IS_MAPR=FALSE
     export PYCHBASE_LIBJVM_DIR=/usr/lib/jvm/jre-1.7.0/lib/amd64/server
     export PYCHBASE_INCLUDE_DIR=/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/include
@@ -75,7 +77,13 @@ I have attempted to mimic the great HappyBase API as closely as possible.
 
 Make sure to set the LD_LIBRARY_PATH environment variable:
 
+    # MapR
     export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$JAVA_HOME/jre/lib/amd64/server:/opt/mapr/lib
+
+    # Non MapR
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/jvm/jre-1.7.0/lib/amd64/server::/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/lib/native
+    export HBASE_LIB_DIR=/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/lib/
+    # I've only gotten it to work on CDH4. If you are on CDH5 you'll need to mess around with the classpath some more
 
 Imports:
 
@@ -166,6 +174,7 @@ Check out __init__.py to understand which features of HappyBase I have not yet i
 In the future, I will force print warnings to stderr in the event a user uses an unimplemented feature.
 
 # Environment Variables Guide
+
 Please note that the following environment variables must be set in order to install `pychbase` correctly:
 
  * PYCHBASE_IS_MAPR

@@ -46,6 +46,9 @@ else:
         sys.stderr.write("WARNING: $PYCHBASE_IS_MAPR should be 'TRUE' or 'FALSE', not '%s', I am defaulting to TRUE\n" % is_mapr)
 
 
+define_macros = []
+if is_mapr:
+    define_macros.append(('PYCHBASE_MAPR', '1'))
 
 libraries = ['jvm']
 library_dirs = [libjvm_dir]
@@ -134,10 +137,11 @@ module1 = Extension('pychbase._pychbase',
                     sources=['pychbase.cc'],
                     include_dirs=include_dirs,
                     libraries=libraries,
-                    library_dirs=library_dirs)
+                    library_dirs=library_dirs,
+                    define_macros=define_macros)
 
 setup(name='pychbase',
-      version='0.1.6',
+      version='0.1.7',
       description=long_description,
       long_description=read_md('README.md'),
       url='https://github.com/mkmoisen/pychbase',

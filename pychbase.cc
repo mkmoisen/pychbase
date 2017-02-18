@@ -544,6 +544,7 @@ struct CallBackBuffer {
         mutex = PTHREAD_MUTEX_INITIALIZER;
         ret = NULL;
         only_rowkeys = false; // Set to true to only retrieve row key
+        include_timestamp = false;
     }
     ~CallBackBuffer() {
         /*
@@ -586,7 +587,10 @@ struct BatchCallBackBuffer {
         while (call_back_buffers.size() > 0) {
             CallBackBuffer *call_back_buffer = call_back_buffers.back();
             call_back_buffers.pop_back();
+            pthread_mutex_lock(&call_back_buffer->mutex);
             delete call_back_buffer;
+            //pthread_mutex_unlock(&call_back_buffer->mutex);
+
             //free(call_back_buffers);
         }
     }
@@ -841,7 +845,7 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
         char *column_family_name_char = PyString_AsString(column_family_name);
         CHECK_MEM_EXC(column_family_name_char); // Is this necessary
 
-        err = hb_coldesc_create((byte_t *)column_family_name_char, strlen(column_family_name_char) + 1, &families[counter]);
+        err = hb_coldesc_create((byte_t *)column_family_name_char, strlen(column_family_name_char), &families[counter]);
         CHECK_FORMAT_EXC(err == 0, PyExc_ValueError, "Failed to create column descriptor '%s'\n", column_family_name_char);
 
         //Py_ssize_t dict_size = PyDict_Size(column_family_attributes);
@@ -1335,6 +1339,7 @@ typedef enum {ADD_COLUMN_GET, ADD_COLUMN_SCAN, ADD_COLUMN_DELETE} add_columns_ty
 * Split columns may return 12 for OOM
 * Returns -10 if type was not 1, 2, 3
 * Any other error means hb_get_add_column failed
+* Returns -20 if Non-MapR environment attempts to use hb_scanner_add_column
 *
 */
 //static int row_add_columns(PyObject *columns, hb_get_t *get, RowBuffer *row_buff) {
@@ -1386,12 +1391,17 @@ static int row_add_columns(PyObject *columns, void *get, RowBuffer *row_buff, ad
 
                 //err = hb_get_add_column(*((hb_get_t *)get), (byte_t *) family, strlen(family), (byte_t *) qualifier, qualifier_len);
                 switch (type) {
+
                     case ADD_COLUMN_GET:
                         err = hb_get_add_column(*((hb_get_t *) get), (byte_t *) family, strlen(family), (byte_t *) qualifier, qualifier_len);
                         break;
                     case ADD_COLUMN_SCAN:
+                        #ifdef PYCHBASE_MAPR == 1
                         err = hb_scanner_add_column(*((hb_scanner_t *) get), (byte_t *) family, strlen(family), (byte_t *) qualifier, qualifier_len);
                         break;
+                        #else
+                        return -20;
+                        #endif /*PYCHBASE_MAPR*/
                     case ADD_COLUMN_DELETE:
                         if (!timestamp) {
                             // TODO this only works for MapR? Or maybe HBASE_LATEST_TIMESTAMP works for both, but the documentation says to use the UINT64MAX thing or -1
@@ -1427,7 +1437,9 @@ static int row_add_columns(PyObject *columns, void *get, RowBuffer *row_buff, ad
                 PyErr_SetString(PyExc_TypeError, "columns must be a list-like object, not a string\n"); \
             } else if (err == -10) {    \
                 PyErr_SetString(HBaseError, "pychbase has a severe bug for row_add_columns method; bad type\n");    \
-            } else {    \
+            } else if (err == -20) {    \
+                PyErr_SetString(HBaseError, "Non-MapR environments cannot set columns on a scanner\n");    \
+            }  else {  \
                 PyErr_Format(HBaseError, "Failed to add column to get due to unknown error: %i\n", err);    \
             }   \
             goto error; \
@@ -1493,8 +1505,12 @@ static PyObject *Table_row(Table *self, PyObject *args) {
     if (timestamp_int) {
         // happybase is inclusive, libhbasec is exclusive
         // TODO submit patch for exclusive in documentation
+        #ifdef PYCHBASE_MAPR == 1
         err = hb_get_set_timerange(get, NULL, timestamp_int + 1);
         CHECK_FORMAT_EXC(err == 0, PyExc_ValueError, "Could not set timestamp on get: %i\n", err);
+        #else
+        CHECK_SET_EXC(0, HBaseError, "Non-MapR environments do not support timestamp on get\n");
+        #endif /*PYCHBASE_MAPR*/
     }
 
     row_buff = new RowBuffer();
@@ -2278,9 +2294,15 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
     CHECK_FORMAT_EXC(err == 0, HBaseError, "Failed to set num_max_rows scanner: %i", err);
 
     if (timestamp_int) {
+        #ifdef PYCHBASE_MAPR == 1
         err = hb_scanner_set_timerange(scan, NULL, timestamp_int + 1);
         CHECK_FORMAT_EXC(err == 0, PyExc_ValueError, "Could not set timestamp '%i' on scan: %i\n", timestamp_int, err);
+        #else
+        printf("***********************************************************************************************\n");
+        CHECK_SET_EXC(0, HBaseError, "Non-MapR environments cannot support timestamps on a scan\n");
+        #endif /*PYCHBASE_MAPR*/
     }
+
 
     row_buf = new RowBuffer();
     CHECK_MEM_EXC(row_buf);

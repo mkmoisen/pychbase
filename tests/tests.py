@@ -7,6 +7,7 @@ from datetime import datetime
 
 class TestCConnection(unittest.TestCase):
     def test_bad_cldbs(self):
+        # Cloudera struggles with this test
         connection = _connection('abc')
         self.assertFalse(connection.is_open())
         self.assertRaises(ValueError, connection.open)
@@ -165,6 +166,10 @@ class TestCConnectionManageTable(unittest.TestCase):
 class TestCTableInit(unittest.TestCase):
     def setUp(self):
         self.connection = _connection(ZOOKEEPERS)
+        try:
+            self.connection.delete_table(TABLE_NAME)
+        except ValueError:
+            pass
         self.connection.create_table(TABLE_NAME, {'f': {}})
 
     def tearDown(self):
