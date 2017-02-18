@@ -16,7 +16,7 @@ If you are using this with MapR, you must also have `/opt/mapr/lib` on your `LD_
 
 E.g,
 
-    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$JAVA_HOME/jre/lib/amd64/server:/opt/mapr/lib
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$JAVA_HOME/lib/amd64/server:/opt/mapr/lib
 
 # Installation
 
@@ -37,23 +37,7 @@ Normally, the only environment variable to worry about on a MapR environment is 
 
 ## Installation on a Non-MapR environment
 
-For Non-MapR environments you have to worry about all the environment variables. Please check the end of this readme for the guide on these environment variables.
-
-Note that I haven't yet tested it on Cloudera, and I wasn't able to get the jars/classpath working
-
-    export PYCHBASE_IS_MAPR=FALSE
-    export PYCHBASE_LIBJVM_DIR=/usr/lib/jvm/jre-1.7.0/lib/amd64/server
-    export PYCHBASE_INCLUDE_DIR=/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/include
-    export PYCHBASE_LIBRARY_DIR=/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/lib/native
-    virtualenv pychbase
-    cd pychbase
-    source bin/activate
-    pip install pychbase
-
-    # Or build it from source
-    git clone https://github.com/mkmoisen/pychbase.git
-    cd pychbase
-    python setup.py install
+    Please see the end of the readme
 
 # Run the tests
 
@@ -173,7 +157,24 @@ Check out __init__.py to understand which features of HappyBase I have not yet i
 
 In the future, I will force print warnings to stderr in the event a user uses an unimplemented feature.
 
-# Environment Variables Guide
+# Non-MapR Installation and Environment Variables Guide
+
+I have not tested `pychbase` heavily on Cloudera. I couldn't get it working on CDH5 due to a classpath issue with `libhbase`, and
+and while I was able to get it up and running with CDH4, some of the tests are failing. It seems to me that `libhbase` is not fully compatible outside of MapR.
+
+    export PYCHBASE_IS_MAPR=FALSE
+    export PYCHBASE_LIBJVM_DIR=/usr/lib/jvm/jre-1.7.0/lib/amd64/server
+    export PYCHBASE_INCLUDE_DIR=/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/include
+    export PYCHBASE_LIBRARY_DIR=/home/matthew/libhbase/target/libhbase-1.0-SNAPSHOT/lib/native
+    virtualenv pychbase
+    cd pychbase
+    source bin/activate
+    pip install pychbase
+
+    # Or build it from source
+    git clone https://github.com/mkmoisen/pychbase.git
+    cd pychbase
+    python setup.py install
 
 Please note that the following environment variables must be set in order to install `pychbase` correctly:
 
