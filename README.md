@@ -37,11 +37,11 @@ Normally, the only environment variable to worry about on a MapR environment is 
 
 ## Installation on a Non-MapR environment
 
-    Please see the end of the readme
+Please see the end of the readme for Cloudera intallation notes.
 
 # Run the tests
 
-The `config.py` file in the `tests` directory has two constants, `ZOOKEEPER` and `TABLE_NAME`, that probably won't work if you run the tests.
+The `config.py` file in the `tests` directory has two constants, `ZOOKEEPER` and `TABLE_NAME`, that probably won't work if you run the tests without modification
 
 Create a `tests/local_config.py` file like the following:
 
@@ -123,6 +123,7 @@ To batch put:
         ('foo1', 'a1', 'b1'),
         ('foo2', 'a2', 'b2'),
     ]
+
     for obj in objs:
         batch.put(obj[0], {'f:foo': obj[1], 'f:bar': obj[2]})
 
