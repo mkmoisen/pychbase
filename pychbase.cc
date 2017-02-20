@@ -2031,6 +2031,8 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 call_back_buffer->scan_count += 1;
                 pthread_mutex_unlock(&call_back_buffer->mutex);
 
+                hb_result_destroy(results[r]);
+
                 continue;
             }
 
@@ -2445,8 +2447,9 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
         printf("is count bool is true, returning scan count\n");
         return Py_BuildValue("i", scan_count);
     }
-    
-    //printf("is count bool is false, returning list\n");
+
+
+    printf("is count bool is false, returning list\n");
     return ret;
 
 error:
@@ -2998,6 +3001,13 @@ error:
 }
 
 
+static PyObject *Table_count(Table *self, PyObject *args, PyObject *kwargs) {
+    printf("IN TABLE_COUNT\n");
+    // Todo need to inject is_count here, currently doing that in Python layer
+    PyObject *count = Table_scan(self, args, kwargs);
+    printf("AFTER TABLE_SCAN\n");
+    return count;
+}
 
 static PyObject *Table_delete_prefix(Table *self, PyObject *args) {
     int err;
@@ -3057,6 +3067,7 @@ static PyMethodDef Table_methods[] = {
     {"delete", (PyCFunction) Table_delete, METH_VARARGS, "Deletes one row"},
     {"batch", (PyCFunction) Table_batch, METH_VARARGS, "sends a batch"},
     {"delete_prefix", (PyCFunction) Table_delete_prefix, METH_VARARGS, "Deletes all rows with a given prefix"},
+    {"count", (PyCFunction) Table_count, METH_VARARGS | METH_KEYWORDS, "Counts rows in a table"},
     {NULL}
 };
 

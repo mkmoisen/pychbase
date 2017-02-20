@@ -92,11 +92,8 @@ class Table(object):
         # TODO columns
         return self._table.delete(row, columns, timestamp, wal)
 
-    def scan(self, start=None, stop=None, row_prefix=None, columns=None, filter=None, timestamp=None,
-             include_timestamp=None, batch_size=1000, scan_batching=None, limit=None, sorted_columns=False,
-             reverse=False, only_rowkeys=False, is_count=False):
-
-        # TODO Think about how to do scan_batching
+    @staticmethod
+    def _start_stop_from_row_prefix(start, stop, row_prefix):
         if row_prefix is None:
             if start is None:
                 start = ''
@@ -109,34 +106,40 @@ class Table(object):
             start = row_prefix
             stop = row_prefix + '~'
 
-        for result in self._table.scan(start, stop, columns, filter, timestamp, include_timestamp, only_rowkeys, batch_size, is_count):
-            if only_rowkeys or is_count:
-                # C will return just the row
-                yield result
-            else:
-                # C will return the row, data
-                yield result[0], result[1]
+        return start, stop
+
+    def scan(self, start=None, stop=None, row_prefix=None, columns=None, filter=None, timestamp=None,
+             include_timestamp=None, batch_size=1000, scan_batching=None, limit=None, sorted_columns=False,
+             reverse=False, only_rowkeys=False):
+
+        # TODO Think about how to do scan_batching
+
+        start, stop = Table._start_stop_from_row_prefix(start, stop, row_prefix)
+
+        # If only_rowkeys is True, result will just be a rowkey str
+        # otherwise, result is (key, data) tuple
+        for result in self._table.scan(start, stop, columns, filter, timestamp, include_timestamp, only_rowkeys, batch_size):
+            yield result
 
     def count(self, start=None, stop=None, row_prefix=None, filter=None, timestamp=None, batch_size=1000):
+        start, stop = Table._start_stop_from_row_prefix(start, stop,row_prefix)
+        # TODO C should inject the is_count, not Python
+        return self._table.count(start=start, stop=stop, columns=None, filter=filter, timestamp=timestamp,
+                                 only_rowkeys=True, batch_size=batch_size, is_count=True)
 
-        # scan() uses yield even when is_count is true
-        foo = self.scan(start=start, stop=stop, row_prefix=row_prefix, filter=filter, timestamp=timestamp,
-                           batch_size=batch_size, only_rowkeys=True,
-                           is_count=True)
-        return foo()
-
-
-    def delete_prefix(self, rowkey_prefix, *args, **kwargs):
+    def delete_prefix(self, rowkey_prefix, filter=None, timestamp=None, batch_size=1000):
         # TODO would this be faster if I moved it to C?
+        # TODO test with filter
+        # TODO test with timestamp
         delete_count = 0
         batch = self.batch()
-        for row_key in self.scan(row_prefix=rowkey_prefix, only_rowkeys=True):
+        for row_key in self.scan(row_prefix=rowkey_prefix, filter=filter, timestamp=timestamp,
+                                 batch_size=batch_size, only_rowkeys=True):
             batch.delete(row_key)
             delete_count += 1
 
         errors = batch.send()
         # Should I raise an exception if there are errors?
-
         return delete_count
 
     def close(self):
