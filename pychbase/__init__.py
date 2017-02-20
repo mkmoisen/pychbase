@@ -94,12 +94,9 @@ class Table(object):
 
     def scan(self, start=None, stop=None, row_prefix=None, columns=None, filter=None, timestamp=None,
              include_timestamp=None, batch_size=1000, scan_batching=None, limit=None, sorted_columns=False,
-             reverse=False, only_rowkeys=False):
-        # TODO columns
-        # TODO filter
-        # TODO timestamp
-        # TODO include_timestamp
-        # TODO Think about how to do batch_size/scan_batching
+             reverse=False, only_rowkeys=False, is_count=False):
+
+        # TODO Think about how to do scan_batching
         if row_prefix is None:
             if start is None:
                 start = ''
@@ -111,8 +108,9 @@ class Table(object):
                 raise TypeError("Do not use start/stop in conjunction with row_prefix")
             start = row_prefix
             stop = row_prefix + '~'
-        for result in self._table.scan(start, stop, columns, filter, timestamp, include_timestamp, only_rowkeys, batch_size):
-            if only_rowkeys:
+
+        for result in self._table.scan(start, stop, columns, filter, timestamp, include_timestamp, only_rowkeys, batch_size, is_count):
+            if only_rowkeys or is_count:
                 # C will return just the row
                 yield result
             else:
@@ -120,13 +118,13 @@ class Table(object):
                 yield result[0], result[1]
 
     def count(self, start=None, stop=None, row_prefix=None, filter=None, timestamp=None, batch_size=1000):
-        c = 0
 
-        for _ in self.scan(start=start, stop=stop, row_prefix=row_prefix, filter=filter, timestamp=timestamp,
-                           batch_size=batch_size, only_rowkeys=True):
-            c += 1
+        # scan() uses yield even when is_count is true
+        foo = self.scan(start=start, stop=stop, row_prefix=row_prefix, filter=filter, timestamp=timestamp,
+                           batch_size=batch_size, only_rowkeys=True,
+                           is_count=True)
+        return foo()
 
-        return c
 
     def delete_prefix(self, rowkey_prefix, *args, **kwargs):
         # TODO would this be faster if I moved it to C?

@@ -534,6 +534,8 @@ struct CallBackBuffer {
     BatchCallBackBuffer *batch_call_back_buffer;
     bool include_timestamp;
     bool only_rowkeys; // Used in scan call back to only return rowkeys
+    bool is_count; // Used in scan to not spool any rowkeys or values - only used for table.count() method
+    int scan_count;
     //PyObject *rets;
     // TODO I don't require the Table *t anymore right?
     CallBackBuffer(RowBuffer *r, BatchCallBackBuffer *bcbb) {
@@ -545,6 +547,8 @@ struct CallBackBuffer {
         ret = NULL;
         only_rowkeys = false; // Set to true to only retrieve row key
         include_timestamp = false;
+        is_count = false;
+        scan_count = 0;
     }
     ~CallBackBuffer() {
         /*
@@ -2021,6 +2025,15 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
 
             PyObject *tuple;
 
+            // TODO DO I NEED TO LOCK THIS TO DO call_back_buffer->is_count ??
+            if (call_back_buffer->is_count) {
+                pthread_mutex_lock(&call_back_buffer->mutex);
+                call_back_buffer->scan_count += 1;
+                pthread_mutex_unlock(&call_back_buffer->mutex);
+
+                continue;
+            }
+
             // API doesn't document when this returns something other than 0
             err = hb_result_get_key(results[r], &key, &keyLen);
             if (err != 0) {
@@ -2037,6 +2050,7 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 return;
             }
 
+            // TODO DO I NEED TO LOCK THIS ?
             if (!call_back_buffer->only_rowkeys) {
 
                 // Do I need a null check?
@@ -2100,9 +2114,10 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
             strncpy(key_char, (char *)key, keyLen);
             key_char[keyLen] = '\0';
 
+
             if (!call_back_buffer->only_rowkeys) {
                 tuple = Py_BuildValue("sO",(char *)key_char, dict);
-                free(key_char);
+                //free(key_char);
 
                 Py_DECREF(dict);
 
@@ -2117,9 +2132,12 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
 
                     hb_result_destroy(results[r]);
 
+                    free(key_char);
+
                     return;
                 }
             }
+
 
             // I can't imagine this lock being necessary
             // However the helgrind report went from 24000 lines to 3500 after adding it?
@@ -2130,7 +2148,9 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 // TODO Do I need to check for errors and decryef on Py_BuildValue string?
                 err = PyList_Append(call_back_buffer->ret, Py_BuildValue("s", (char *) key_char));
             }
+            free(key_char);
             pthread_mutex_unlock(&call_back_buffer->mutex);
+
             if (err != 0) {
                 pthread_mutex_lock(&call_back_buffer->mutex);
                 call_back_buffer->err = err;
@@ -2151,7 +2171,8 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
                 return;
             }
 
-            if (!call_back_buffer->only_rowkeys) {
+
+            if (!call_back_buffer->only_rowkeys && !call_back_buffer->is_count) {
                 Py_DECREF(tuple);
             }
 
@@ -2217,6 +2238,9 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
     PyObject *batch_size = NULL;
     int batch_size_int = 1000;
 
+    PyObject *is_count = NULL;
+    bool is_count_bool = false;
+
 
     hb_scanner_t scan = NULL;
     RowBuffer *row_buf = NULL;
@@ -2226,8 +2250,10 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
     add_columns_type add_columns_to_scan = ADD_COLUMN_SCAN;
     PyObject *ret = NULL;
 
-    static char *kwlist[] = {"start", "stop", "columns", "filter", "timestamp", "include_timestamp", "only_rowkeys", "batch_size", NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|ssOOOOOO", kwlist, &start, &stop, &columns, &filter, &timestamp, &include_timestamp, &only_rowkeys, &batch_size)) {
+    int scan_count = 0; // TODO should be long
+
+    static char *kwlist[] = {"start", "stop", "columns", "filter", "timestamp", "include_timestamp", "only_rowkeys", "batch_size", "is_count", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|ssOOOOOOO", kwlist, &start, &stop, &columns, &filter, &timestamp, &include_timestamp, &only_rowkeys, &batch_size, &is_count)) {
         return NULL;
     }
     //if (!PyArg_ParseTuple(args, "|ssOOOO", &start, &stop, &columns, &filter, &timestamp, &include_timestamp)) {
@@ -2260,6 +2286,15 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
         }
     }
 
+    if (is_count) {
+        if (is_count != Py_None) {
+            CHECK_SET_EXC(PyObject_TypeCheck(is_count, &PyBool_Type), PyExc_TypeError, "is_count must be boolean\n");
+            if (PyObject_IsTrue(is_count)) {
+                is_count_bool = true;
+            }
+        }
+    }
+
     if (batch_size) {
         if (batch_size != Py_None) {
             CHECK_SET_EXC(PyInt_Check(batch_size), PyExc_TypeError, "batch_size must be int\n");
@@ -2276,7 +2311,7 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
         }
     }
 
-    if (only_rowkeys_bool) {
+    if (only_rowkeys_bool || is_count_bool) {
         char *minimize_filter = "FirstKeyOnlyFilter() AND KeyOnlyFilter()";
         printf("only rowkeys is true\n");
         if (filter_char == NULL) {
@@ -2368,6 +2403,7 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
 
     call_back_buffer->include_timestamp = include_timestamp_bool;
     call_back_buffer->only_rowkeys = only_rowkeys_bool;
+    call_back_buffer->is_count = is_count_bool;
 
     call_back_buffer->ret = PyList_New(0);
     CHECK_MEM_EXC(call_back_buffer->ret);
@@ -2388,6 +2424,7 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
 
     ret = call_back_buffer->ret;
     err = call_back_buffer->err;
+    scan_count = call_back_buffer->scan_count;
 
     delete call_back_buffer;
 
@@ -2403,6 +2440,13 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
 
     if (tmp_filter_char) free(tmp_filter_char);
 
+
+    if (is_count_bool) {
+        printf("is count bool is true, returning scan count\n");
+        return Py_BuildValue("i", scan_count);
+    }
+    
+    //printf("is count bool is false, returning list\n");
     return ret;
 
 error:
