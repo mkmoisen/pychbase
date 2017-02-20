@@ -2204,12 +2204,18 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
     char *stop = "";
     PyObject *columns = NULL;
     PyObject *filter = NULL;
+    char *filter_char = NULL;
+    // This is used to concatenate the filter_char to certain filters when only_rowkeys is true
+    char *tmp_filter_char = NULL;
     PyObject *timestamp = NULL;
     uint64_t timestamp_int = NULL;
     PyObject *include_timestamp = NULL;
     bool include_timestamp_bool = false;
     PyObject *only_rowkeys = NULL;
     bool only_rowkeys_bool = false;
+
+    PyObject *batch_size = NULL;
+    int batch_size_int = 1000;
 
 
     hb_scanner_t scan = NULL;
@@ -2220,8 +2226,8 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
     add_columns_type add_columns_to_scan = ADD_COLUMN_SCAN;
     PyObject *ret = NULL;
 
-    static char *kwlist[] = {"start", "stop", "columns", "filter", "timestamp", "include_timestamp", "only_rowkeys", NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|ssOOOOO", kwlist, &start, &stop, &columns, &filter, &timestamp, &include_timestamp, &only_rowkeys)) {
+    static char *kwlist[] = {"start", "stop", "columns", "filter", "timestamp", "include_timestamp", "only_rowkeys", "batch_size", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|ssOOOOOO", kwlist, &start, &stop, &columns, &filter, &timestamp, &include_timestamp, &only_rowkeys, &batch_size)) {
         return NULL;
     }
     //if (!PyArg_ParseTuple(args, "|ssOOOO", &start, &stop, &columns, &filter, &timestamp, &include_timestamp)) {
@@ -2230,20 +2236,15 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
 
     if (timestamp) {
         if (timestamp != Py_None) {
-            if (!PyInt_Check(timestamp)) {
-                PyErr_SetString(PyExc_TypeError, "Timestamp must be int\n");
-                return NULL;
-            }
+            CHECK_SET_EXC(PyInt_Check(timestamp), PyExc_TypeError, "timestamp must be int\n");
             timestamp_int = PyInt_AsSsize_t(timestamp);
+            CHECK_FORMAT_EXC(timestamp_int >= 0, PyExc_ValueError, "timestamp must be >= 0, not %i\n", timestamp_int);
         }
     }
 
     if (include_timestamp) {
         if (include_timestamp != Py_None) {
-            if (!PyObject_TypeCheck(include_timestamp, &PyBool_Type)) {
-                PyErr_SetString(PyExc_TypeError, "include_timestamp must be boolean\n");
-                return NULL;
-            }
+            CHECK_SET_EXC(PyObject_TypeCheck(include_timestamp, &PyBool_Type), PyExc_TypeError, "include_timestamp must be boolean\n");
             if (PyObject_IsTrue(include_timestamp)) {
                 include_timestamp_bool = true;
             }
@@ -2252,13 +2253,46 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
 
     if (only_rowkeys) {
         if (only_rowkeys != Py_None) {
-            if (!PyObject_TypeCheck(only_rowkeys, &PyBool_Type)) {
-                PyErr_SetString(PyExc_TypeError, "only_rowkeys must be boolean\n");
-                return NULL;
-            }
+            CHECK_SET_EXC(PyObject_TypeCheck(only_rowkeys, &PyBool_Type), PyExc_TypeError, "only_rowkeys must be boolean\n");
             if (PyObject_IsTrue(only_rowkeys)) {
                 only_rowkeys_bool = true;
             }
+        }
+    }
+
+    if (batch_size) {
+        if (batch_size != Py_None) {
+            CHECK_SET_EXC(PyInt_Check(batch_size), PyExc_TypeError, "batch_size must be int\n");
+            batch_size_int = PyInt_AsSsize_t(batch_size);
+            CHECK_FORMAT_EXC(batch_size_int >= 1, PyExc_ValueError, "batch_size must be >= 1, not %i\n", batch_size_int)
+        }
+    }
+
+    if (filter) {
+        if (filter != Py_None) {
+            CHECK_SET_EXC(PyObject_TypeCheck(filter, &PyBaseString_Type), PyExc_TypeError, "filter must be str\n");
+            filter_char = PyString_AsString(filter);
+            CHECK_SET_EXC(!(strcmp(filter_char, "") == 0), PyExc_ValueError, "filter cannot be empty string\n");
+        }
+    }
+
+    if (only_rowkeys_bool) {
+        char *minimize_filter = "FirstKeyOnlyFilter() AND KeyOnlyFilter()";
+        printf("only rowkeys is true\n");
+        if (filter_char == NULL) {
+            filter_char = minimize_filter;
+            printf("filter_char was NULL, so its now %s\n", filter_char);
+        } else {
+            printf("filter_char was originally %s\n", filter_char);
+            //snprintf(row_key_stop, sizeof(row_key_stop), "%s~", row_key_start);
+            // + 1 for "(", + 1 for ")", +5 for " AND " + 1 for \0
+            tmp_filter_char = (char *) malloc(sizeof(char) * (strlen(minimize_filter) + strlen(filter_char) + 1 + 1 + 5 + 1));
+            err = sprintf(tmp_filter_char, "(%s) AND FirstKeyOnlyFilter() AND KeyOnlyFilter()", filter_char);
+            printf("tmp is %s\n", tmp_filter_char);
+            CHECK_MEM_EXC(tmp_filter_char);
+            printf("after mem check\n");
+            filter_char = tmp_filter_char;
+            printf("filter_char is now %s\n", filter_char);
         }
     }
 
@@ -2284,13 +2318,24 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
         CHECK_FORMAT_EXC(err == 0, PyExc_ValueError, "Failed to set stop row '%s' on scanner: %i", stop, err);
     }
 
-    // Does it optimize if I set this higher?
-    // TODO what is this?
-    /**
-     * Sets the maximum number of rows to scan per call to hb_scanner_next().
-     */
     // TODO Ok oddly in the sample code they use 1 or 3 for this value. Shouldn't I set it really high? or 0????
-    err = hb_scanner_set_num_max_rows(scan, 1);
+    // http://tsunanet.net/~tsuna/asynchbase/api/org/hbase/async/Scanner.html#setMaxNumRows(int)
+    // http://tsunanet.net/~tsuna/asynchbase/api/constant-values.html#org.hbase.async.Scanner.DEFAULT_MAX_NUM_ROWS
+    // After some playing around, it appears to me that the difference between 1 and 100 is really significant.
+    // However, the difference between 100 and 1000 doesn't seem much different.
+    // The difference between 1000 and 1 million isn't even apparent.
+    // TODO find if there is some natural limit to this above which it makes no difference in performance
+    err = hb_scanner_set_num_max_rows(scan, batch_size_int);
+    /*
+    if (only_rowkeys_bool && batch_size_int < 10000) {
+        printf("Setting num max rows to 10,000\n");
+        err = hb_scanner_set_num_max_rows(scan, 10000);
+    } else {
+        printf("Setting num max rows to %i\n", batch_size_int);
+        err = hb_scanner_set_num_max_rows(scan, batch_size_int);
+    }
+    */
+
     CHECK_FORMAT_EXC(err == 0, HBaseError, "Failed to set num_max_rows scanner: %i", err);
 
     if (timestamp_int) {
@@ -2302,6 +2347,17 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
         CHECK_SET_EXC(0, HBaseError, "Non-MapR environments cannot support timestamps on a scan\n");
         #endif /*PYCHBASE_MAPR*/
     }
+
+    // TODO UNIT TEST
+    if (filter_char) {
+        #ifdef PYCHBASE_MAPR == 1
+        err = hb_scanner_set_filter(scan, (byte_t *)filter_char, strlen(filter_char));
+        CHECK_FORMAT_EXC(err == 0, PyExc_ValueError, "Could not set filter '%s' on scan: %i\n", filter_char, err);
+        #else
+        CHECK_SET_EXC(0, HBaseError, "Non-MapR environments cannot support filters on a scan\n");
+        #endif
+    }
+
 
 
     row_buf = new RowBuffer();
@@ -2345,9 +2401,12 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
         return NULL;
     }
 
+    if (tmp_filter_char) free(tmp_filter_char);
+
     return ret;
 
 error:
+    if (tmp_filter_char) free(tmp_filter_char);
     if (row_buf) delete row_buf;
     if (call_back_buffer) delete call_back_buffer;
     // TODO do I need a call back here like on that segfault bug for admin_destroy
@@ -3441,7 +3500,7 @@ init_pychbase(void)
     PyModule_AddObject(m, "Foo", (PyObject *) &FooType);
 
     // Add the type to the module
-    // failing to add this tp_new will result in: TypeError: cannot create 'pychbase._connection' instances
+    // failing to add this tp_new will result in: PyExc_TypeError: cannot create 'pychbase._connection' instances
     ConnectionType.tp_new = PyType_GenericNew;
     Py_INCREF(&ConnectionType);
     PyModule_AddObject(m, "_connection", (PyObject *) &ConnectionType);

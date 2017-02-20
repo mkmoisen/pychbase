@@ -94,7 +94,7 @@ class Table(object):
 
     def scan(self, start=None, stop=None, row_prefix=None, columns=None, filter=None, timestamp=None,
              include_timestamp=None, batch_size=1000, scan_batching=None, limit=None, sorted_columns=False,
-             reverse=False):
+             reverse=False, only_rowkeys=False):
         # TODO columns
         # TODO filter
         # TODO timestamp
@@ -107,17 +107,32 @@ class Table(object):
                 stop = ''
         else:
             if start or stop:
+                # HappyBase raises a TypeError instead of a ValueError
                 raise TypeError("Do not use start/stop in conjunction with row_prefix")
             start = row_prefix
             stop = row_prefix + '~'
-        for k, v in self._table.scan(start, stop, columns, filter, timestamp, include_timestamp):
-            yield k, v
+        for result in self._table.scan(start, stop, columns, filter, timestamp, include_timestamp, only_rowkeys, batch_size):
+            if only_rowkeys:
+                # C will return just the row
+                yield result
+            else:
+                # C will return the row, data
+                yield result[0], result[1]
+
+    def count(self, start=None, stop=None, row_prefix=None, filter=None, timestamp=None, batch_size=1000):
+        c = 0
+
+        for _ in self.scan(start=start, stop=stop, row_prefix=row_prefix, filter=filter, timestamp=timestamp,
+                           batch_size=batch_size, only_rowkeys=True):
+            c += 1
+
+        return c
 
     def delete_prefix(self, rowkey_prefix, *args, **kwargs):
         # TODO would this be faster if I moved it to C?
         delete_count = 0
         batch = self.batch()
-        for row_key, obj in self.scan(rowkey_prefix, rowkey_prefix + '~'):
+        for row_key in self.scan(row_prefix=rowkey_prefix, only_rowkeys=True):
             batch.delete(row_key)
             delete_count += 1
 

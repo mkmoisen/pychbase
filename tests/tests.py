@@ -1017,6 +1017,12 @@ class TestCTableScan(unittest.TestCase):
         for row, data in self.table.scan('', '', None, None, 5):
             self.assertEquals(data, {'f:foo': 'foo'})
 
+        # 0 shouldn't throw an error
+        for row, data in self.table.scan('', '', None, None, 0):
+            pass
+
+        # -1 should throw an error
+        self.assertRaises(ValueError, self.table.scan, timestamp=-1)
         self.assertRaises(TypeError, self.table.scan, '', '', None, None, 'invalid')
 
     def test_include_timestamp_type(self):
@@ -1033,6 +1039,49 @@ class TestCTableScan(unittest.TestCase):
             self.assertEquals(data, {'f:foo': ('foo', 5)})
 
         self.assertRaises(TypeError, self.table.scan, '', '', None, None, 5, 'invalid')
+
+    def test_batch_size_type(self):
+        for i in range(0, 10):
+            self.table.put('foo%i' % i, {'f:foo': 'foo'}, 5)
+
+        for row, data in self.table.scan(batch_size=None):
+            self.assertEquals(data, {'f:foo': 'foo'})
+
+        for row, data in self.table.scan(batch_size=10):
+            self.assertEquals(data, {'f:foo': 'foo'})
+
+        # 0 and -1 should throw an error
+        self.assertRaises(ValueError, self.table.scan, batch_size=0)
+        self.assertRaises(ValueError, self.table.scan, batch_size=-1)
+        self.assertRaises(TypeError, self.table.scan, batch_size='invalid')
+
+    def test_filter_type(self):
+        for row, data in self.table.scan(filter='FirstKeyOnlyFilter()'):
+            pass
+
+        for row, data in self.table.scan(filter=None):
+            pass
+
+        self.assertRaises(ValueError, self.table.scan, filter="")
+        self.assertRaises(ValueError, self.table.scan, filter='invalid filter syntax')
+        self.assertRaises(TypeError, self.table.scan, filter={'foo': 'bar'})
+
+
+class TestCTableScanFilter(unittest.TestCase):
+    def setUp(self):
+        self.connection = _connection(ZOOKEEPERS)
+        try:
+            self.connection.create_table(TABLE_NAME, {'f': {}})
+        except ValueError:
+            pass
+        self.table = _table(self.connection, TABLE_NAME)
+
+    def tearDown(self):
+        try:
+            self.connection.delete_table(TABLE_NAME)
+        except ValueError:
+            pass
+        self.connection.close()
 
 
 class TestCTableScanColumns(unittest.TestCase):
@@ -1390,6 +1439,47 @@ class TestPythonHappy(unittest.TestCase):
             i += 1
 
         self.assertEquals(i, 0)
+
+
+class TestPythonTableCount(unittest.TestCase):
+    def setUp(self):
+        # TODO Configure this for non-mapr users
+        self.connection = Connection()
+        try:
+            self.connection.create_table(TABLE_NAME, {'f': {}})
+        except ValueError:
+            pass
+        self.table = self.connection.table(TABLE_NAME)
+        batch = self.table.batch()
+        for i in range(10):
+            batch.put("a%i" % i, {"f:foo": "f:foo%i" % i})
+
+        for i in range(10):
+            batch.put("b%i" % i, {"f:bar": "f:bar%i" % i})
+
+        for i in range(10):
+            batch.put("c%i" % i, {"f:baz": "f:baz%i" % i})
+
+        batch.send()
+
+    def tearDown(self):
+        try:
+            self.connection.delete_table(TABLE_NAME, disable=True)
+        except ValueError:
+            pass
+        self.connection.close()
+
+    def test_full(self):
+        count = self.table.count()
+        self.assertEquals(count, 30)
+
+    def test_prefix(self):
+        count = self.table.count(row_prefix='b')
+        self.assertEquals(count, 10)
+
+    def test_row_regex_filter(self):
+        count = self.table.count(filter="RowFilter(=, 'regexstring:^b')")
+        self.assertEquals(count, 10)
 
 
 class TestPythonRowPrefix(unittest.TestCase):
