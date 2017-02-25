@@ -169,7 +169,7 @@ To batch put:
 
     errors = batch.send()
 
-    assert errors = 0
+    assert errors == 0
 
 To batch delete:
 
@@ -180,7 +180,7 @@ To batch delete:
 
     errors = batch.send()
 
-    assert errors = 0
+    assert errors == 0
 
 Note that `batch.send()` returns the number of errors that occurred, if any. It is up to the client to ignore this or raise an exception.
 
@@ -207,7 +207,7 @@ An additional helper method is `table.delete_prefix(row_prefix)`, which deletes 
 
 Note that attempting to batch/put unescaped null terminators will result in them being stripped.
 Attempting to use a row key with an unescaped null terminator will raise a TypeException.
-It is the users duty to escap null terminators before attempting to batch/put data.
+It is the user's duty to escape null terminators before attempting to batch/put data.
 
     table.put('foo', {'f:foo\0bar': 'baz\0bak'})
     data = table.row('foo')
@@ -217,11 +217,11 @@ It is the users duty to escap null terminators before attempting to batch/put da
     data = table.row('foo')
     assert data == {'f:foo\\0bar': 'baz\00bak'}
 
-# Happybase compatibility
+# HappyBase compatibility
 
 One goal of this library is to maintain compatibility with the APIs in HappyBase.
 
-Check out __init__.py to understand which features of HappyBase I have not yet implemented.
+Check out \__init__.py to understand which features of HappyBase I have not yet implemented.
 
 In the future, I will force print warnings to stderr in the event a user uses an unimplemented feature.
 
