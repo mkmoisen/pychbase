@@ -2311,7 +2311,6 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
     //if (!PyArg_ParseTuple(args, "|ssOOOO", &start, &stop, &columns, &filter, &timestamp, &include_timestamp)) {
     //    return NULL;
     //}
-    //printf("After ParseTuple, timestamp is %i", timestamp_int);
 
     if (limit) {
         if (limit != Py_None) {
@@ -2375,21 +2374,18 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
 
     if (only_rowkeys_bool || is_count_bool) {
         char *minimize_filter = "FirstKeyOnlyFilter() AND KeyOnlyFilter()";
-        printf("only rowkeys is true\n");
+
         if (filter_char == NULL) {
             filter_char = minimize_filter;
-            printf("filter_char was NULL, so its now %s\n", filter_char);
+
         } else {
-            printf("filter_char was originally %s\n", filter_char);
-            //snprintf(row_key_stop, sizeof(row_key_stop), "%s~", row_key_start);
             // + 1 for "(", + 1 for ")", +5 for " AND " + 1 for \0
             tmp_filter_char = (char *) malloc(sizeof(char) * (strlen(minimize_filter) + strlen(filter_char) + 1 + 1 + 5 + 1));
             err = sprintf(tmp_filter_char, "(%s) AND FirstKeyOnlyFilter() AND KeyOnlyFilter()", filter_char);
-            printf("tmp is %s\n", tmp_filter_char);
+
             CHECK_MEM_EXC(tmp_filter_char);
-            printf("after mem check\n");
             filter_char = tmp_filter_char;
-            printf("filter_char is now %s\n", filter_char);
+
         }
     }
 
@@ -2423,15 +2419,6 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
     // The difference between 1000 and 1 million isn't even apparent.
     // TODO find if there is some natural limit to this above which it makes no difference in performance
     err = hb_scanner_set_num_max_rows(scan, batch_size_int);
-    /*
-    if (only_rowkeys_bool && batch_size_int < 10000) {
-        printf("Setting num max rows to 10,000\n");
-        err = hb_scanner_set_num_max_rows(scan, 10000);
-    } else {
-        printf("Setting num max rows to %i\n", batch_size_int);
-        err = hb_scanner_set_num_max_rows(scan, batch_size_int);
-    }
-    */
 
     CHECK_FORMAT_EXC(err == 0, HBaseError, "Failed to set num_max_rows scanner: %i", err);
 
@@ -2440,7 +2427,6 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
         err = hb_scanner_set_timerange(scan, NULL, timestamp_int + 1);
         CHECK_FORMAT_EXC(err == 0, PyExc_ValueError, "Could not set timestamp '%i' on scan: %i\n", timestamp_int, err);
         #else
-        printf("***********************************************************************************************\n");
         CHECK_SET_EXC(0, HBaseError, "Non-MapR environments cannot support timestamps on a scan\n");
         #endif /*PYCHBASE_MAPR*/
     }
@@ -2503,12 +2489,9 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
 
 
     if (is_count_bool) {
-        printf("is count bool is true, returning scan count\n");
         return Py_BuildValue("i", scan_count);
     }
 
-
-    printf("is count bool is false, returning list\n");
     return ret;
 
 error:
@@ -3061,10 +3044,8 @@ error:
 
 
 static PyObject *Table_count(Table *self, PyObject *args, PyObject *kwargs) {
-    printf("IN TABLE_COUNT\n");
     // Todo need to inject is_count here, currently doing that in Python layer
     PyObject *count = Table_scan(self, args, kwargs);
-    printf("AFTER TABLE_SCAN\n");
     return count;
 }
 
@@ -3084,17 +3065,14 @@ static PyObject *Table_delete_prefix(Table *self, PyObject *args) {
 
     row_key_stop = (char *) malloc(sizeof(char) * (strlen(row_key_start) + 1 + 1)); // 1 for ~ 1 for \0
     err = snprintf(row_key_stop, sizeof(row_key_stop), "%s~", row_key_start);
-    printf("err was %i\n", err);
-    printf("row_key_stop is %s\n", row_key_stop);
 
     PyObject *dict = PyDict_New();
     PyDict_SetItem(dict, Py_BuildValue("s", "start"), Py_BuildValue("s", row_key_start));
     PyDict_SetItem(dict, Py_BuildValue("s", "stop"), Py_BuildValue("s", row_key_stop));
     PyDict_SetItem(dict, Py_BuildValue("s", "only_rowkeys"), Py_True);
-    printf("before calling table_scan\n");
+
     PyObject *tuple = PyTuple_New(0);
     PyObject *row_keys = Table_scan(self, tuple, dict);
-    printf("after calling table_scan\n");
 
     for (Py_ssize_t i = 0; i < PyList_GET_SIZE(row_keys); i++) {
         PyObject *row_key = PyList_GetItem(row_keys, i);
@@ -3109,12 +3087,8 @@ static PyObject *Table_delete_prefix(Table *self, PyObject *args) {
 
     PyObject *return_tuple = Table_batch(self, Py_BuildValue("(O)", row_keys));
 
-    printf("before free\n");
     free(row_key_stop);
 
-    printf("before return\n");
-    //return row_keys;
-    //return row_keys;
     return return_tuple;
 }
 
