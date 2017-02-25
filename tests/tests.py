@@ -155,13 +155,6 @@ class TestCConnectionManageTable(unittest.TestCase):
         connection = _connection(ZOOKEEPERS)
         connection.create_table(TABLE_NAME, {u'f': {u'max_versions': 1}})
 
-    def test_special_symbols_in_table_name(self):
-        raise NotImplementedError
-
-
-
-
-
 
 class TestCTableInit(unittest.TestCase):
     def setUp(self):
@@ -1248,19 +1241,18 @@ class TestCTableScanFilter(unittest.TestCase):
 
         self.assertEquals(i, 4)
         self.assertEquals(key, 'bar3')
-    """
+
     def test_timestamp_filter(self):
         self.table.put('foo', {'f:foo': 'foo'}, 10)
         self.table.put('bar', {'f:foo': 'foo'})
 
         i = 0
         # TODO why doesn't this work?
-        for key, data in self.table.scan(filter="TimeStampsFilter (10)"):
-            self.assertEquals(key, 'bar')
+        for key, data in self.table.scan(filter="TimestampsFilter (10)"):
+            self.assertEquals(key, 'foo')
             i += 1
 
         self.assertEquals(i, 1)
-    """
 
     def test_row_filter(self):
         self.table.put("bar1", {"f:bar1": "bar1"})
@@ -1317,39 +1309,55 @@ class TestCTableScanFilter(unittest.TestCase):
 
         self.assertEquals(i, 1)
 
+    def test_dependent_column_filter(self):
+        self.table.put("foo", {'f:a': 'a', 'f:b': 'b', 'f:c': 'c', 'f:d': 'd'})
+        self.table.put("bar", {'f:z': 'a', 'f:zz': 'b', 'f:zzz': 'c', 'f:zzzz': 'd'})
 
-    #def test_dependent_column_filter(self):
-    #    raise NotImplementedError
+        i = 0
+        for row, data in self.table.scan(filter="DependentColumnFilter('f', 'a')"):
+            self.assertEquals(row, 'foo')
+            self.assertEquals(data, {'f:a': 'a', 'f:b': 'b', 'f:c': 'c', 'f:d': 'd'})
+            i += 1
 
-    """
+        self.assertEquals(i, 1)
+
     def test_single_column_value_filter(self):
         self.table.put("foo", {'f:foo': 'foo', 'f:bar': 'bar', 'f:baz': 'baz'})
         self.table.put("bar", {'f:foo': 'bar', 'f:bar': 'bar', 'f:baz': 'bar'})
         # MapR not showing the expected behavior
         i = 0
-        for row, data in self.table.scan(filter="SingleColumnValueFilter('binary:f', 'binary:foo', =, 'binary:foo')"):
+        for row, data in self.table.scan(filter="SingleColumnValueFilter('f', 'foo', =, 'binary:foo')"):
             self.assertEquals(row, 'foo')
             self.assertEquals(data, {'f:foo': 'foo', 'f:bar': 'bar', 'f:baz': 'baz'})
             i += 1
 
         self.assertEquals(i, 1)
-    """
-    """
+
     def test_single_column_value_exclude_filter(self):
         self.table.put("foo", {'f:foo': 'foo', 'f:bar': 'bar', 'f:baz': 'baz'})
         self.table.put("bar", {'f:foo': 'bar', 'f:bar': 'bar', 'f:baz': 'bar'})
 
         i = 0
         # MapR not showing the expected behavior
-        for row, data in self.table.scan(filter="SingleColumnValueExcludeFilter('binary:f', 'binary:foo', =, 'binary:foo')"):
+        for row, data in self.table.scan(filter="SingleColumnValueExcludeFilter('f', 'foo', =, 'binary:foo')"):
             self.assertEquals(row, 'foo')
             self.assertEquals(data, {'f:bar': 'bar', 'f:baz': 'baz'})
             i += 1
 
         self.assertEquals(i, 1)
-    """
-    #def test_column_range_filter(self):
-    #    raise NotImplementedError
+
+    def test_column_range_filter(self):
+        self.table.put("foo", {'f:a': 'a', 'f:b': 'b', 'f:c': 'c', 'f:d': 'd'})
+        self.table.put("bar", {'f:z': 'a', 'f:zz': 'b', 'f:zzz': 'c', 'f:zzzz': 'd'})
+
+        i = 0
+        # MapR doesn't appear to honor the max bool? Also min and max bools seem backwards.
+        for row, data in self.table.scan(filter="ColumnRangeFilter('a', true, 'd', true)"):
+            self.assertEquals(row, 'foo')
+            self.assertEquals(data, {'f:a': 'a', 'f:b': 'b', 'f:c': 'c'})
+            i += 1
+
+        self.assertEquals(i, 1)
 
 
 

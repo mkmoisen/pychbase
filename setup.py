@@ -141,7 +141,7 @@ module1 = Extension('pychbase._pychbase',
                     define_macros=define_macros)
 
 setup(name='pychbase',
-      version='0.1.7',
+      version='0.1.8',
       description=long_description,
       long_description=read_md('README.md'),
       url='https://github.com/mkmoisen/pychbase',
