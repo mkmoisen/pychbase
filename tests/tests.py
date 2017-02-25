@@ -1066,6 +1066,21 @@ class TestCTableScan(unittest.TestCase):
         self.assertRaises(ValueError, self.table.scan, filter='invalid filter syntax')
         self.assertRaises(TypeError, self.table.scan, filter={'foo': 'bar'})
 
+    def test_only_rowkeys(self):
+        for i in range(10):
+            self.table.put("foo%i" % i, {"f:foo": "bar"})
+
+        i = 0
+        for row in self.table.scan(only_rowkeys=True):
+            self.assertEquals(row, 'foo%i' % i)
+            i += 1
+
+        self.assertEquals(i, 10)
+
+    def test_only_rowkey_type(self):
+        self.assertRaises(TypeError, self.table.scan, only_rowkeys='invalid')
+        self.assertRaises(TypeError, self.table.scan, only_rowkeys=1)
+
 
 class TestCTableScanFilter(unittest.TestCase):
     def setUp(self):

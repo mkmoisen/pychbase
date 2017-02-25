@@ -2220,6 +2220,32 @@ table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testIntera
 table.scan('hello', 'hello100~')
 */
 
+// TODO check http://stackoverflow.com/a/42353243/1391717
+static int convert_timestamp(PyObject *python, void *c) {
+    if (python) {
+        if (python != Py_None) {
+            if (!PyInt_Check(python)) {
+                PyErr_SetString(PyExc_TypeError, "Timestamp must be int");
+                return 0;
+            }
+            int tmp = PyInt_AsSsize_t(python);
+            if (tmp < 0) {
+                PyErr_Format(PyExc_ValueError, "Timestamp must be > 0, not %i", tmp);
+                return 0;
+            }
+
+            *((int *) c) = tmp;
+        }
+    }
+    return 1;
+}
+
+/*
+Use:
+int baz = 5;
+int err = foo(&baz);
+*/
+
 static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
     int err = 0;
 
@@ -2255,12 +2281,14 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
     int scan_count = 0; // TODO should be long
 
     static char *kwlist[] = {"start", "stop", "columns", "filter", "timestamp", "include_timestamp", "only_rowkeys", "batch_size", "is_count", NULL};
+    //if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|ssOOO&OOOO", kwlist, &start, &stop, &columns, &filter, &convert_timestamp, &timestamp_int, &include_timestamp, &only_rowkeys, &batch_size, &is_count)) {
     if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|ssOOOOOOO", kwlist, &start, &stop, &columns, &filter, &timestamp, &include_timestamp, &only_rowkeys, &batch_size, &is_count)) {
         return NULL;
     }
     //if (!PyArg_ParseTuple(args, "|ssOOOO", &start, &stop, &columns, &filter, &timestamp, &include_timestamp)) {
     //    return NULL;
     //}
+    printf("After ParseTuple, timestamp is %i", timestamp_int);
 
     if (timestamp) {
         if (timestamp != Py_None) {
@@ -2269,6 +2297,7 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
             CHECK_FORMAT_EXC(timestamp_int >= 0, PyExc_ValueError, "timestamp must be >= 0, not %i\n", timestamp_int);
         }
     }
+
 
     if (include_timestamp) {
         if (include_timestamp != Py_None) {
