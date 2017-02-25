@@ -113,12 +113,15 @@ class Table(object):
              reverse=False, only_rowkeys=False):
 
         # TODO Think about how to do scan_batching
+        # TODO limit
+        # TODO sorted columns
+        # TODO reverse
 
         start, stop = Table._start_stop_from_row_prefix(start, stop, row_prefix)
 
         # If only_rowkeys is True, result will just be a rowkey str
         # otherwise, result is (key, data) tuple
-        for result in self._table.scan(start, stop, columns, filter, timestamp, include_timestamp, only_rowkeys, batch_size):
+        for result in self._table.scan(start, stop, columns, filter, timestamp, include_timestamp, only_rowkeys, batch_size, limit):
             yield result
 
     def count(self, start=None, stop=None, row_prefix=None, filter=None, timestamp=None, batch_size=1000):

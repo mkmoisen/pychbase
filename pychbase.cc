@@ -536,6 +536,7 @@ struct CallBackBuffer {
     bool only_rowkeys; // Used in scan call back to only return rowkeys
     bool is_count; // Used in scan to not spool any rowkeys or values - only used for table.count() method
     int scan_count;
+    int scan_limit;
     //PyObject *rets;
     // TODO I don't require the Table *t anymore right?
     CallBackBuffer(RowBuffer *r, BatchCallBackBuffer *bcbb) {
@@ -549,6 +550,7 @@ struct CallBackBuffer {
         include_timestamp = false;
         is_count = false;
         scan_count = 0;
+        scan_limit = NULL;
     }
     ~CallBackBuffer() {
         /*
@@ -2025,11 +2027,12 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
 
             PyObject *tuple;
 
+            call_back_buffer->scan_count += 1;
             // TODO DO I NEED TO LOCK THIS TO DO call_back_buffer->is_count ??
             if (call_back_buffer->is_count) {
-                pthread_mutex_lock(&call_back_buffer->mutex);
-                call_back_buffer->scan_count += 1;
-                pthread_mutex_unlock(&call_back_buffer->mutex);
+                //pthread_mutex_lock(&call_back_buffer->mutex);
+                //call_back_buffer->scan_count += 1;
+                //pthread_mutex_unlock(&call_back_buffer->mutex);
 
                 hb_result_destroy(results[r]);
 
@@ -2179,6 +2182,21 @@ void scan_callback(int32_t err, hb_scanner_t scan, hb_result_t *results, size_t 
             }
 
             hb_result_destroy(results[r]);
+
+            // TODO If len > limit, end early
+            if (call_back_buffer->scan_limit) {
+                if (call_back_buffer->scan_count == call_back_buffer->scan_limit) {
+                    pthread_mutex_lock(&call_back_buffer->mutex);
+                    call_back_buffer->err = err;
+                    call_back_buffer->count = 1;
+                    delete call_back_buffer->rowBuf;
+                    pthread_mutex_unlock(&call_back_buffer->mutex);
+
+                    hb_scanner_destroy(scan, NULL, NULL);
+
+                    return;
+                }
+            }
         }
         // The API doesn't specify when the return value would not be 0
         // But it is used in this unittest:
@@ -2269,6 +2287,9 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
     PyObject *is_count = NULL;
     bool is_count_bool = false;
 
+    PyObject *limit = NULL;
+    int limit_int = NULL;
+
 
     hb_scanner_t scan = NULL;
     RowBuffer *row_buf = NULL;
@@ -2278,17 +2299,27 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
     add_columns_type add_columns_to_scan = ADD_COLUMN_SCAN;
     PyObject *ret = NULL;
 
+
+
     int scan_count = 0; // TODO should be long
 
-    static char *kwlist[] = {"start", "stop", "columns", "filter", "timestamp", "include_timestamp", "only_rowkeys", "batch_size", "is_count", NULL};
+    static char *kwlist[] = {"start", "stop", "columns", "filter", "timestamp", "include_timestamp", "only_rowkeys", "batch_size", "is_count", "limit", NULL};
     //if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|ssOOO&OOOO", kwlist, &start, &stop, &columns, &filter, &convert_timestamp, &timestamp_int, &include_timestamp, &only_rowkeys, &batch_size, &is_count)) {
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|ssOOOOOOO", kwlist, &start, &stop, &columns, &filter, &timestamp, &include_timestamp, &only_rowkeys, &batch_size, &is_count)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|ssOOOOOOOO", kwlist, &start, &stop, &columns, &filter, &timestamp, &include_timestamp, &only_rowkeys, &batch_size, &is_count, &limit)) {
         return NULL;
     }
     //if (!PyArg_ParseTuple(args, "|ssOOOO", &start, &stop, &columns, &filter, &timestamp, &include_timestamp)) {
     //    return NULL;
     //}
-    printf("After ParseTuple, timestamp is %i", timestamp_int);
+    //printf("After ParseTuple, timestamp is %i", timestamp_int);
+
+    if (limit) {
+        if (limit != Py_None) {
+            CHECK_SET_EXC(PyInt_Check(limit), PyExc_TypeError, "limit must be int\n");
+            limit_int = PyInt_AsSsize_t(limit);
+            CHECK_FORMAT_EXC(limit_int >= 1, PyExc_ValueError, "limit must be >= 1, not %i\n", limit_int);
+        }
+    }
 
     if (timestamp) {
         if (timestamp != Py_None) {
@@ -2424,8 +2455,6 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
         #endif
     }
 
-
-
     row_buf = new RowBuffer();
     CHECK_MEM_EXC(row_buf);
 
@@ -2435,6 +2464,7 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
     call_back_buffer->include_timestamp = include_timestamp_bool;
     call_back_buffer->only_rowkeys = only_rowkeys_bool;
     call_back_buffer->is_count = is_count_bool;
+    call_back_buffer->scan_limit = limit_int;
 
     call_back_buffer->ret = PyList_New(0);
     CHECK_MEM_EXC(call_back_buffer->ret);

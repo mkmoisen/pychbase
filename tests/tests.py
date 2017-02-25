@@ -1066,6 +1066,53 @@ class TestCTableScan(unittest.TestCase):
         self.assertRaises(ValueError, self.table.scan, filter='invalid filter syntax')
         self.assertRaises(TypeError, self.table.scan, filter={'foo': 'bar'})
 
+    def test_limit_type(self):
+        for row, data in self.table.scan(limit=None):
+            pass
+
+        for row, data in self.table.scan(limit=1):
+            pass
+
+        self.assertRaises(ValueError, self.table.scan, limit=0)
+        self.assertRaises(TypeError, self.table.scan, limit='invalid')
+
+    def test_limit(self):
+        for i in range(10):
+            self.table.put("foo%i" % i, {"f:foo": "bar"})
+
+        i = 0
+        for row, data in self.table.scan(limit=5):
+            self.assertEquals(row, 'foo%i' % i)
+            i += 1
+
+        self.assertEquals(i, 5)
+
+    def test_limit_with_batch_size(self):
+        for i in range(10):
+            self.table.put("foo%i" % i, {"f:foo": "bar"})
+
+        i = 0
+        for row, data in self.table.scan(limit=5, batch_size=4):
+            self.assertEquals(row, 'foo%i' % i)
+            i += 1
+
+        self.assertEquals(i, 5)
+
+        i = 0
+        for row, data in self.table.scan(limit=5, batch_size=5):
+            self.assertEquals(row, 'foo%i' % i)
+            i += 1
+
+        self.assertEquals(i, 5)
+
+        i = 0
+        for row, data in self.table.scan(limit=5, batch_size=6):
+            self.assertEquals(row, 'foo%i' % i)
+            i += 1
+
+        self.assertEquals(i, 5)
+
+
     def test_only_rowkeys(self):
         for i in range(10):
             self.table.put("foo%i" % i, {"f:foo": "bar"})
