@@ -113,7 +113,6 @@ class Table(object):
              reverse=False, only_rowkeys=False):
 
         # TODO Think about how to do scan_batching
-        # TODO limit
         # TODO sorted columns
         # TODO reverse
 
