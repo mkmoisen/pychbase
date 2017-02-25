@@ -120,7 +120,9 @@ class Table(object):
 
         # If only_rowkeys is True, result will just be a rowkey str
         # otherwise, result is (key, data) tuple
-        for result in self._table.scan(start, stop, columns, filter, timestamp, include_timestamp, only_rowkeys, batch_size, limit):
+        for result in self._table.scan(start=start, stop=stop, columns=columns, filter=filter, timestamp=timestamp,
+                                       include_timestamp=include_timestamp, only_rowkeys=only_rowkeys,
+                                       batch_size=batch_size, limit=limit):
             yield result
 
     def count(self, start=None, stop=None, row_prefix=None, filter=None, timestamp=None, batch_size=1000):

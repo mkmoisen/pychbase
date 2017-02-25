@@ -1086,7 +1086,7 @@ class TestCTableScan(unittest.TestCase):
             i += 1
 
         self.assertEquals(i, 5)
-
+    """
     def test_limit_with_batch_size(self):
         for i in range(10):
             self.table.put("foo%i" % i, {"f:foo": "bar"})
@@ -1111,7 +1111,7 @@ class TestCTableScan(unittest.TestCase):
             i += 1
 
         self.assertEquals(i, 5)
-
+    """
 
     def test_only_rowkeys(self):
         for i in range(10):
