@@ -221,7 +221,7 @@ It is the user's duty to escape null terminators before attempting to batch/put 
 
 One goal of this library is to maintain compatibility with the APIs in HappyBase.
 
-Check out \__init__.py to understand which features of HappyBase I have not yet implemented.
+Check out `__init__.py` to understand which features of HappyBase I have not yet implemented.
 
 In the future, I will force print warnings to stderr in the event a user uses an unimplemented feature.
 
