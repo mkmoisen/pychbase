@@ -1,9 +1,9 @@
 # pychbase
-This is a Python C wrapper for HBase and MapRDB using the [libhbase C API](https://github.com/mapr/libhbase).
+This is a Python C wrapper for MapRDB and HBase using the [libhbase C API](https://github.com/mapr/libhbase).
 
 `pychbase` is modeled after the HappyBase API, but it does not use `thrift`, and is ideal for MapRDB.
 
-Currently in beta, `pychbase` is tested on Python 2.7 and MapR 5.1.
+`pychbase` is tested on Python 2.7 and MapR 5.1.
 
 # LD_LIBRARY_PATH
 
@@ -93,62 +93,118 @@ To get a table to operate on:
 
 To put, delete, and get from a table:
 
-    table.put('rowkey1', {'f:foo': 'bar'})
-    obj = table.row('rowkey1')
-    assert obj == {'f:foo': 'bar'}
+    table.put('rowkey1', {'f:foo': 'bar', 'f:hai': 'bai'})
+    data = table.row('rowkey1')
+    assert data == {'f:foo': 'bar', 'f:hai': 'bai'}
+
+    data = table.row('rowkey1', columns=('f:foo',))
+    assert data == {'f:foo': 'bar'}
 
     table.delete('rowkey1')
-    obj = table.row('rowkey1')
-    assert obj == {}
+    data = table.row('rowkey1')
+    assert data == {}
 
 To scan:
 
     # Full table scan:
-    for row_key, obj in table.scan():
+    for row, data in table.scan():
         pass
 
     # Scan with a start and stop:
-    for row_key, obj in table.scan('foo', 'bar'):
+    for row, data in table.scan('foo', 'bar'):
         pass
 
     # Scan with a row prefix:
-    for row_key, obj in table.scan(row_prefix='baz'): # E.g., start='baz', stop='baz~'
+    for row, data in table.scan(row_prefix='baz'): # E.g., start='baz', stop='baz~'
         pass
+
+    # Scan with a filter: # Check out tests.py on how to use all of the filters
+    for row, data in table.scan(filter="SingleColumnValueFilter('f', 'foo', =, 'binary:foo')":
+        pass
+
+    # Scan a table but return only row keys, no rows:
+    table.put('foo', {'f:foo': 'foo'}
+    table.put('foo1', {'f:foo': 'foo'}
+    table.put('foo2', {'f:foo': 'foo'}
+
+    rows = list(table.scan(only_rowkeys=True))
+    assert rows == ['foo', 'foo1', 'foo2']
+
+To count the number of rows in a table:
+
+    # Full table count:
+    count = table.count()
+
+    # Count all rows with a start and stop
+    count = table.count('foo', 'bar')
+
+    # Count all rows whose row key starts with a row prefix:
+    count = table.count(row_prefix='baz') # E.g., start='baz', stop='baz~'
+
+    # Count all rows with a filter:
+    count = table.count(filter="SingleColumnValueFilter('f', 'foo', =, 'binary:foo')")
 
 To batch put:
 
     batch = table.batch()
-    objs = [
+    datas = [
         ('foo', 'a', 'b'),
         ('foo1', 'a1', 'b1'),
         ('foo2', 'a2', 'b2'),
     ]
 
-    for obj in objs:
-        batch.put(obj[0], {'f:foo': obj[1], 'f:bar': obj[2]})
+    for data in datas:
+        batch.put(data[0], {'f:foo': data[1], 'f:bar': data[2]})
 
-    batch.send()
+    errors = batch.send()
+
+    assert errors = 0
 
 To batch delete:
 
     batch = table.batch()
-    row_keys = ['foo', 'foo1', 'foo2']
-    for row_key in row_keys:
-        batch.delete(row_key)
+    rows = ['foo', 'foo1', 'foo2']
+    for row in rows:
+        batch.delete(row)
 
-    batch.delete()
+    errors = batch.send()
+
+    assert errors = 0
+
+Note that `batch.send()` returns the number of errors that occurred, if any. It is up to the client to ignore this or raise an exception.
+
+    batch = table.batch()
+    batch.put('foo', {'f:foo', 'bar'})
+    batch.put('foo', 'invalid')
+
+    errors = batch.send()
+    assert errors == 1
+
+
+An additional helper method is `table.delete_prefix(row_prefix)`, which deletes all rows containing starting with the prefix.
+
+    table.put('foo', {'f:foo', 'foo'}
+    table.put('foo1', {'f:foo', 'foo'}
+    table.put('foo2', {'f:foo', 'foo'}
+    table.put('foo3', {'f:foo', 'foo'}
+    table.put('bar', {'f:bar', 'bar'}
+
+    number_deleted = table.delete_prefix('foo')
+    assert number_deleted == 3
+
+    assert table.count() == 2
 
 Note that attempting to batch/put unescaped null terminators will result in them being stripped.
 Attempting to use a row key with an unescaped null terminator will raise a TypeException.
 It is the users duty to escap null terminators before attempting to batch/put data.
 
     table.put('foo', {'f:foo\0bar': 'baz\0bak'})
-    obj = table.row('foo')
-    assert obj == {'f:foo': 'baz'}
+    data = table.row('foo')
+    assert data == {'f:foo': 'baz'}
 
     table.put('bar', {'f:foo\\0bar': 'baz\00bak'})
-    obj = table.row('foo')
-    assert obj == {'f:foo\\0bar': 'baz\00bak'}
+    data = table.row('foo')
+    assert data == {'f:foo\\0bar': 'baz\00bak'}
 
 # Happybase compatibility
 
