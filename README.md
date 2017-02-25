@@ -93,16 +93,27 @@ To get a table to operate on:
 
 To put, delete, and get from a table:
 
+    # Put a row with the current timestamp
     table.put('rowkey1', {'f:foo': 'bar', 'f:hai': 'bai'})
     data = table.row('rowkey1')
     assert data == {'f:foo': 'bar', 'f:hai': 'bai'}
 
+    # Get a row and only include a single column
     data = table.row('rowkey1', columns=('f:foo',))
     assert data == {'f:foo': 'bar'}
 
+    # Delete the row
     table.delete('rowkey1')
     data = table.row('rowkey1')
     assert data == {}
+
+    # Put a row with a given timestamp
+    table.put('rowkey1', {'f:foo': 'bar'}, timestamp=1000)
+    table.put('rowkey1', {'f:foo': 'BAR'}, timestamp=10000)
+
+    # Get a row with a given timestamp and include its timestamp
+    data = table.row('rowkey1', timestamp=1000, include_timestamp=True)
+    assert data == {'f:foo': ('bar', 1000)}
 
 To scan:
 
