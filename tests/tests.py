@@ -1145,6 +1145,206 @@ class TestCTableScanFilter(unittest.TestCase):
             pass
         self.connection.close()
 
+    def test_key_only_filter(self):
+        self.table.put("foo", {"f:foo": "bar"})
+
+        i = 0
+        for key, data in self.table.scan(filter='KeyOnlyFilter()'):
+            i += 1
+            self.assertEquals(key, 'foo')
+            self.assertEquals(data, {"f:foo": ""})
+
+        self.assertEquals(i, 1)
+
+    def test_first_key_only_filter(self):
+        self.table.put("foo", {"f:foo": "bar", "f:baz": "foobar"})
+
+        i = 0
+        for key, data in self.table.scan(filter='FirstKeyOnlyFilter()'):
+            i += 1
+            self.assertEquals(key, 'foo')
+            self.assertEquals(len(data), 1)
+
+        self.assertEquals(i, 1)
+
+    def test_prefix_filter(self):
+        self.table.put("foo", {"f:foo": "foo"})
+        self.table.put("bar1", {"f:bar1": "bar1"})
+        self.table.put("bar2", {"f:bar2": "bar2"})
+        self.table.put("bar3", {"f:bar3": "bar3"})
+        self.table.put("baz", {"f:baz": "baz"})
+
+        i = 1
+        for key, data in self.table.scan(filter="PrefixFilter('bar')"):
+            self.assertEquals(key, 'bar%i' % i)
+            self.assertEquals(data, {"f:bar%i" % i: "bar%i" % i})
+            i += 1
+
+        self.assertEquals(i, 4)
+
+    def test_column_prefix_filter(self):
+        self.table.put("foo", {"f:foo": "foo", "f:bar1": "bar1", "f:bar2": "bar2", "f:bar3": "bar3", "f:baz": "baz"})
+
+        i = 0
+        for key, data in self.table.scan(filter="ColumnPrefixFilter('bar')"):
+            i += 1
+            self.assertEquals(data, {"f:bar1": "bar1", "f:bar2": "bar2", "f:bar3": "bar3"})
+
+        self.assertEquals(i, 1)
+
+    def test_multiple_column_prefix_filter(self):
+        self.table.put("foo", {"f:foo1": "foo1", "f:foo2": "foo2", "f:foo3": "foo3", "f:bar1": "bar1", "f:bar2": "bar2", "f:bar3": "bar3", "f:baz": "baz"})
+
+        i = 0
+        for key, data in self.table.scan(filter="MultipleColumnPrefixFilter('foo', 'bar')"):
+            i += 1
+            self.assertEquals(data, {"f:foo1": "foo1", "f:foo2": "foo2", "f:foo3": "foo3", "f:bar1": "bar1", "f:bar2": "bar2", "f:bar3": "bar3"})
+
+        self.assertEquals(i, 1)
+
+    def test_column_count_filter(self):
+        self.table.put("foo", {"f:foo": "foo", "f:bar1": "bar1", "f:bar2": "bar2", "f:bar3": "bar3", "f:baz": "baz"})
+
+        i = 0
+        for key, data in self.table.scan(filter="ColumnCountGetFilter(3)"):
+            self.assertEquals(len(data), 3)
+            i += 1
+
+        self.assertEquals(i, 1)
+
+    def test_page_filter(self):
+        for i in range(10):
+            self.table.put("foo%i" % i, {"f:foo": "bar"})
+
+        i = 0
+        for key, data in self.table.scan(filter='PageFilter(4)'):
+            self.assertEquals(key, 'foo%i' % i)
+            i += 1
+
+        self.assertEquals(i, 4)
+
+    def test_column_pagination_filter(self):
+        self.table.put("foo", {"f:foo": "foo", "f:bar1": "bar1", "f:bar2": "bar2", "f:bar3": "bar3", "f:baz": "baz"})
+
+        # Column Pagination requires both (limit, offset)
+        self.assertRaises(ValueError, self.table.scan, filter='ColumnPaginationFilter(4)')
+
+        for key, data in self.table.scan(filter='ColumnPaginationFilter(4, 0)'):
+            self.assertEquals(len(data), 4)
+
+        for key, data in self.table.scan(filter='ColumnPaginationFilter(4, 4)'):
+            self.assertEquals(len(data), 1)
+
+    def test_inclusive_stop_filter(self):
+        self.table.put("bar1", {"f:bar1": "bar1"})
+        self.table.put("bar2", {"f:bar2": "bar2"})
+        self.table.put("bar3", {"f:bar3": "bar3"})
+
+        i = 1
+
+        for key, data in self.table.scan(filter="InclusiveStopFilter('bar3')"):
+            self.assertEquals(key, 'bar%i' % i)
+            i += 1
+
+        self.assertEquals(i, 4)
+        self.assertEquals(key, 'bar3')
+
+    def test_timestamp_filter(self):
+        self.table.put('foo', {'f:foo': 'foo'}, 10)
+        self.table.put('bar', {'f:foo': 'foo'})
+
+        i = 0
+        # TODO why doesn't this work?
+        for key, data in self.table.scan(filter="TimeStampsFilter (10)"):
+            self.assertEquals(key, 'bar')
+            i += 1
+
+        self.assertEquals(i, 1)
+
+    def test_row_filter(self):
+        self.table.put("bar1", {"f:bar1": "bar1"})
+        self.table.put("bar2", {"f:bar2": "bar2"})
+        self.table.put("bar3", {"f:bar3": "bar3"})
+
+        i = 1
+        keys = []
+        for key, data in self.table.scan(filter="RowFilter(<= 'binary:bar2')"):
+            keys.append(key)
+            self.assertEquals(key, 'bar%i' % i)
+            i += 1
+
+        self.assertEquals(i, 3)
+
+    def test_family_filter(self):
+        self.connection.delete_table(TABLE_NAME)
+        self.connection.create_table(TABLE_NAME, {'f': {}, 'z': {}})
+        self.table = _table(self.connection, TABLE_NAME)
+
+        self.table.put("foo", {'f:foo': 'foo'})
+        self.table.put("bar", {'z:bar': 'bar', 'f:foo': 'baz'})
+
+        i = 0
+        # Requires binary:
+        for key, data in self.table.scan(filter="FamilyFilter(=, 'binary:z')"):
+            self.assertEquals(key, 'bar')
+            self.assertEquals(data, {'z:bar': 'bar'})
+            i += 1
+
+        self.assertEquals(i, 1)
+
+    def test_qualifier_filter(self):
+        self.table.put("foo", {'f:foo': 'foo'})
+        self.table.put("bar", {'f:bar': 'foo', 'f:baz': 'lol'})
+
+        i = 0
+        for key, data in self.table.scan(filter="QualifierFilter(=, 'binary:bar')"):
+            self.assertEquals(key, 'bar')
+            self.assertEquals(data, {'f:bar': 'foo'})
+            i += 1
+
+        self.assertEquals(i, 1)
+
+    def test_value_filter(self):
+        self.table.put("foo", {'f:foo': 'foo', 'f:bar': 'foo', 'f:baz': 'lol'})
+        self.table.put("bar", {'f:foo': 'lol', 'f:bar': 'lol', 'f:baz': 'lol'})
+
+        i = 0
+        for row, data in self.table.scan(filter="ValueFilter(=, 'binary:foo')"):
+            self.assertEquals(row, 'foo')
+            self.assertEquals(data, {'f:foo': 'foo', 'f:bar': 'foo'})
+            i += 1
+
+        self.assertEquals(i, 1)
+
+
+    def test_dependent_column_filter(self):
+        raise NotImplementedError
+
+    def test_single_column_value_filter(self):
+        self.table.put("foo", {'f:foo': 'foo', 'f:bar': 'bar', 'f:baz': 'baz'})
+        self.table.put("bar", {'f:foo': 'bar', 'f:bar': 'bar', 'f:baz': 'bar'})
+
+        i = 0
+        # TODO This fails with or without binary: why
+        for row, data in self.table.scan(filter="SingleColumnValueFilter(=, 'foo', 'f', 'foo')"):
+            self.assertEquals(row, 'foo')
+            self.assertEquals(data, {'f:foo': 'foo', 'f:bar': 'bar', 'f:baz': 'baz'})
+            i += 1
+
+        self.assertEquals(i, 1)
+
+    
+    def test_single_column_value_exclude_filter(self):
+        raise NotImplementedError
+
+    def test_column_fange_filter(self):
+        raise NotImplementedError
+
+
+
+
+
+
 
 class TestCTableScanColumns(unittest.TestCase):
     def setUp(self):
