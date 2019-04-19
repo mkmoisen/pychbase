@@ -12,6 +12,13 @@
 #define __WINDOWS__
 #endif
 
+struct module_state {
+    PyObject *error;
+};
+
+
+
+#define GETSTATE(m) ((struct module_state*)PyModule_GetState(m))
 
 #define OOM_OBJ_RETURN_NULL(obj) \
     do {                        \
@@ -111,7 +118,8 @@ static void Foo_dealloc(Foo *self) {
     Py_XDECREF(self->last);
     //call the class tp_free function to clean up the type itself.
     // Note how the Type is PyObject * insteaed of FooType * because the object may be a subclass
-    self->ob_type->tp_free((PyObject *) self);
+    PyObject_Free((PyObject *) self);
+    //self->ob_type->tp_free((PyObject *) self);
 
     // Note how there is no XDECREF on self->number
 }
@@ -128,13 +136,13 @@ static PyObject *Foo_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     // If we don't care, we ould have used PyType_GenericNew() as the new method, which sets everything to NULL...
     if (self != NULL) {
         printf("in neww self is not null");
-        self->first = PyString_FromString("");
+        self->first = PyBytes_FromString("");
         if (self->first == NULL) {
             Py_DECREF(self);
             return NULL;
         }
 
-        self->last = PyString_FromString("");
+        self->last = PyBytes_FromString("");
         if (self->last == NULL) {
             Py_DECREF(self);
             return NULL;
@@ -218,7 +226,7 @@ static int Foo_set_first(Foo *self, PyObject *value, void *closure) {
         return -1;
     }
 
-    if (!PyString_Check(value)) {
+    if (!PyUnicode_Check(value)) {
         PyErr_SetString(PyExc_TypeError, "The first attribute value must be a string");
         return -1;
     }
@@ -242,7 +250,7 @@ static int Foo_set_last(Foo *self, PyObject *value, void *closure) {
         return -1;
     }
 
-    if (!PyString_Check(value)) {
+    if (!PyUnicode_Check(value)) {
         PyErr_SetString(PyExc_TypeError, "The last attribute must be a string");
         return -1;
     }
@@ -272,7 +280,7 @@ static PyObject * Foo_name(Foo *self) {
     // We have to check for NULL, because they can be deleted, in which case they are set to NULL.
     // It would be better to prevent deletion of these attributes and to restrict the attribute values to strings.
     if (format == NULL) {
-        format = PyString_FromString("%s %s");
+        format = PyBytes_FromString("%s %s");
         if (format == NULL) {
             return NULL;
         }
@@ -295,7 +303,7 @@ static PyObject * Foo_name(Foo *self) {
         return NULL;
     }
 
-    result = PyString_Format(format, args);
+    result = PyUnicode_Format(format, args);
     // What is the difference between XDECREF and DECREF?
     // Use XDECREF if something can be null, DECREF if it is guarenteed to not be null
     Py_DECREF(args);
@@ -313,8 +321,7 @@ static PyMethodDef Foo_methods[] = {
 
 // Declare the type components
 static PyTypeObject FooType = {
-   PyObject_HEAD_INIT(NULL)
-   0,                         /* ob_size */
+   PyVarObject_HEAD_INIT(NULL, 0)
    "pychbase.Foo",               /* tp_name */
    sizeof(Foo),         /* tp_basicsize */
    0,                         /* tp_itemsize */
@@ -682,7 +689,8 @@ static PyObject *Connection_close(Connection *self) {
 static void Connection_dealloc(Connection *self) {
     Connection_close(self);
     Py_XDECREF(self->zookeepers);
-    self->ob_type->tp_free((PyObject *) self);
+    PyObject_Free((PyObject *) self);
+    //self->ob_type->tp_free((PyObject *) self);
 }
 
 
@@ -730,9 +738,9 @@ table = pychbase._table(connection, '/app/SubscriptionBillingPlatform/testIntera
 static PyObject *Connection_open(Connection *self) {
     if (!self->is_open) {
         int err = 0;
-        err = hb_connection_create(PyString_AsString(self->zookeepers), NULL, &self->conn);
+        err = hb_connection_create(PyBytes_AsString(self->zookeepers), NULL, &self->conn);
         if (err != 0) {
-            PyErr_Format(PyExc_ValueError, "Could not connect using zookeepers '%s': %i", PyString_AsString(self->zookeepers), err);
+            PyErr_Format(PyExc_ValueError, "Could not connect using zookeepers '%s': %i", PyBytes_AsString(self->zookeepers), err);
             return NULL;
         }
 
@@ -845,10 +853,11 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
         // Used for looping over column_family_attributes
         Py_ssize_t o = 0;
 
-        CHECK_SET_EXC(PyObject_TypeCheck(column_family_name, &PyBaseString_Type), PyExc_TypeError, "Key must be string\n");
+        // CHECK_SET_EXC(PyUnicode_Check(column_family_name), PyExc_TypeError, "Key must be string\n");
+        CHECK_SET_EXC(PyUnicode_Check(column_family_name), PyExc_TypeError, "Key must be string\n");
         CHECK_SET_EXC(PyDict_Check(column_family_attributes), PyExc_TypeError,  "Attributes must be a dict\n");
 
-        char *column_family_name_char = PyString_AsString(column_family_name);
+        char *column_family_name_char = PyBytes_AsString(column_family_name);
         CHECK_MEM_EXC(column_family_name_char); // Is this necessary
 
         err = hb_coldesc_create((byte_t *)column_family_name_char, strlen(column_family_name_char), &families[counter]);
@@ -859,13 +868,13 @@ static PyObject *Connection_create_table(Connection *self, PyObject *args) {
         while (PyDict_Next(column_family_attributes, &o, &key, &value)) {
             set_column_family_attribute func;
 
-            CHECK_SET_EXC(PyObject_TypeCheck(key, &PyBaseString_Type), PyExc_TypeError,  "Key must be string\n");
-            CHECK_SET_EXC(PyInt_Check(value), PyExc_TypeError,  "Value must be int\n");
+            CHECK_SET_EXC(PyUnicode_Check(key), PyExc_TypeError,  "Key must be string\n");
+            CHECK_SET_EXC(PyLong_Check(value), PyExc_TypeError,  "Value must be int\n");
 
-            char *key_char = PyString_AsString(key);
+            char *key_char = PyBytes_AsString(key);
             CHECK_MEM_EXC(key_char); // Is this necessary
 
-            int value_int = PyInt_AsSsize_t(value);
+            int value_int = PyLong_AsSize_t(value);
 
             // TODO these should be enums ?
             if (strcmp(key_char, "max_versions") == 0) {
@@ -1030,8 +1039,7 @@ static PyMethodDef Connection_methods[] = {
 
 // Declare the type components
 static PyTypeObject ConnectionType = {
-   PyObject_HEAD_INIT(NULL)
-   0,                         /* ob_size */
+   PyVarObject_HEAD_INIT(NULL, 0)
    "pychbase._connection",               /* tp_name */
    sizeof(Connection),         /* tp_basicsize */
    0,                         /* tp_itemsize */
@@ -1102,7 +1110,9 @@ The call back needs to free the row buf and increment the count when its done
 
 static void Table_dealloc(Table *self) {
     Py_XDECREF(self->connection);
-    self->ob_type->tp_free((PyObject *) self);
+    //self->ob_type->tp_free((PyObject *) self);
+
+    PyObject_Free((PyObject *) self);
 }
 
 /*
@@ -1359,7 +1369,7 @@ static int row_add_columns(PyObject *columns, void *get, RowBuffer *row_buff, ad
                 return -2;
              }
              // TODO ADD TEST FOR THIS
-             if (PyObject_TypeCheck(columns, &PyBaseString_Type)) {
+             if (PyUnicode_Check(columns)) {
                 return -3;
              }
 
@@ -1368,7 +1378,7 @@ static int row_add_columns(PyObject *columns, void *get, RowBuffer *row_buff, ad
              for (Py_ssize_t i = 0; i < number_of_columns; i++) {
 
                 PyObject *column = PySequence_GetItem(columns, i); // Change to fast
-                char *column_char = PyString_AsString(column);
+                char *column_char = PyBytes_AsString(column);
 
                 // Kind of bizzare, but if I alloc it myself and free after hb_get_add_column,
                 // I get memory errors. It seems to me that hb_get_add_column should be copying the contents
@@ -1484,9 +1494,9 @@ static PyObject *Table_row(Table *self, PyObject *args) {
     if (timestamp) {
         if (timestamp != Py_None) {
             // was seg faulting i think before timestamp != Py_None check
-            CHECK_SET_EXC(PyInt_Check(timestamp), PyExc_TypeError, "Timestamp must be int\n");
+            CHECK_SET_EXC(PyLong_Check(timestamp), PyExc_TypeError, "Timestamp must be int\n");
 
-            timestamp_int = (uint64_t) PyInt_AsSsize_t(timestamp);
+            timestamp_int = (uint64_t) PyLong_AsSize_t(timestamp);
         }
     }
 
@@ -1728,15 +1738,15 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
     // This says PyDict_Next borrows references for key and value...
     while (PyDict_Next(dict, &pos, &fq, &value)) {
 
-        if (!PyObject_TypeCheck(fq, &PyBaseString_Type)) {
+        if (!PyUnicode_Check(fq)) {
             return -7;
         }
 
-        if (!PyObject_TypeCheck(value, &PyBaseString_Type)) {
+        if (!PyUnicode_Check(value)) {
             return -8;
         }
 
-        char *fq_char = PyString_AsString(fq);
+        char *fq_char = PyBytes_AsString(fq);
         OOM_OBJ_RETURN_ERRNO(fq_char);
         if (strlen(fq_char) == 0) {
             return -1;
@@ -1756,7 +1766,7 @@ static int make_put(Table *self, RowBuffer *row_buf, const char *row_key, PyObje
 
 
 
-        char *value_char = PyString_AsString(value);
+        char *value_char = PyBytes_AsString(value);
         OOM_OBJ_RETURN_ERRNO(value_char);
 
         /*
@@ -1856,11 +1866,11 @@ static PyObject *Table_put(Table *self, PyObject *args) {
 
     if (timestamp) {
         if (timestamp != Py_None) {
-            if (!PyInt_Check(timestamp)) {
+            if (!PyLong_Check(timestamp)) {
                 PyErr_SetString(PyExc_TypeError, "Timestamp must be int\n");
                 return NULL;
             }
-            timestamp_int = (uint64_t) PyInt_AsSsize_t(timestamp);
+            timestamp_int = (uint64_t) PyLong_AsSize_t(timestamp);
         }
 
     }
@@ -2242,11 +2252,11 @@ table.scan('hello', 'hello100~')
 static int convert_timestamp(PyObject *python, void *c) {
     if (python) {
         if (python != Py_None) {
-            if (!PyInt_Check(python)) {
+            if (!PyLong_Check(python)) {
                 PyErr_SetString(PyExc_TypeError, "Timestamp must be int");
                 return 0;
             }
-            int tmp = PyInt_AsSsize_t(python);
+            int tmp = PyLong_AsSize_t(python);
             if (tmp < 0) {
                 PyErr_Format(PyExc_ValueError, "Timestamp must be > 0, not %i", tmp);
                 return 0;
@@ -2315,16 +2325,16 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
 
     if (limit) {
         if (limit != Py_None) {
-            CHECK_SET_EXC(PyInt_Check(limit), PyExc_TypeError, "limit must be int\n");
-            limit_int = PyInt_AsSsize_t(limit);
+            CHECK_SET_EXC(PyLong_Check(limit), PyExc_TypeError, "limit must be int\n");
+            limit_int = PyLong_AsSize_t(limit);
             CHECK_FORMAT_EXC(limit_int >= 1, PyExc_ValueError, "limit must be >= 1, not %i\n", limit_int);
         }
     }
 
     if (timestamp) {
         if (timestamp != Py_None) {
-            CHECK_SET_EXC(PyInt_Check(timestamp), PyExc_TypeError, "timestamp must be int\n");
-            timestamp_int = PyInt_AsSsize_t(timestamp);
+            CHECK_SET_EXC(PyLong_Check(timestamp), PyExc_TypeError, "timestamp must be int\n");
+            timestamp_int = PyLong_AsSize_t(timestamp);
             CHECK_FORMAT_EXC(timestamp_int >= 0, PyExc_ValueError, "timestamp must be >= 0, not %i\n", timestamp_int);
         }
     }
@@ -2359,16 +2369,16 @@ static PyObject *Table_scan(Table *self, PyObject *args, PyObject *kwargs) {
 
     if (batch_size) {
         if (batch_size != Py_None) {
-            CHECK_SET_EXC(PyInt_Check(batch_size), PyExc_TypeError, "batch_size must be int\n");
-            batch_size_int = PyInt_AsSsize_t(batch_size);
+            CHECK_SET_EXC(PyLong_Check(batch_size), PyExc_TypeError, "batch_size must be int\n");
+            batch_size_int = PyLong_AsSize_t(batch_size);
             CHECK_FORMAT_EXC(batch_size_int >= 1, PyExc_ValueError, "batch_size must be >= 1, not %i\n", batch_size_int)
         }
     }
 
     if (filter) {
         if (filter != Py_None) {
-            CHECK_SET_EXC(PyObject_TypeCheck(filter, &PyBaseString_Type), PyExc_TypeError, "filter must be str\n");
-            filter_char = PyString_AsString(filter);
+            CHECK_SET_EXC(PyUnicode_Check(filter), PyExc_TypeError, "filter must be str\n");
+            filter_char = PyBytes_AsString(filter);
             CHECK_SET_EXC(!(strcmp(filter_char, "") == 0), PyExc_ValueError, "filter cannot be empty string\n");
         }
     }
@@ -2647,11 +2657,11 @@ static PyObject *Table_delete(Table *self, PyObject *args) {
 
     if (timestamp) {
         if (timestamp != Py_None) {
-            if (!PyInt_Check(timestamp)) {
+            if (!PyLong_Check(timestamp)) {
                 PyErr_SetString(PyExc_TypeError, "Timestamp must be int");
                 return NULL;
             }
-            timestamp_int = PyInt_AsSsize_t(timestamp);
+            timestamp_int = PyLong_AsSize_t(timestamp);
         }
     }
 
@@ -2865,20 +2875,20 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
 
         // Mutation Type must be string, notably 'put' or 'delete'
         // TODO this should be changed to enum or constant int
-        CHECK_BATCH_INNER_ERRNO(PyObject_TypeCheck(mutation_type, &PyBaseString_Type), -1); // TODO BETTER ERR
+        CHECK_BATCH_INNER_ERRNO(PyUnicode_Check(mutation_type), -1); // TODO BETTER ERR
 
-        mutation_type_char = PyString_AsString(mutation_type);
+        mutation_type_char = PyBytes_AsString(mutation_type);
         CHECK_BATCH_INNER_ERRNO(mutation_type_char, 12); // Is this check even necessary
 
         row_key = PyTuple_GetItem(tuple, 1);
         CHECK_BATCH_INNER_ERRNO(row_key, 12); // Is this check even necessary
 
         // Row key must be string
-        CHECK_BATCH_INNER_ERRNO(PyObject_TypeCheck(row_key, &PyBaseString_Type), -1); // TODO BETTER ERR
+        CHECK_BATCH_INNER_ERRNO(PyUnicode_Check(row_key), -1); // TODO BETTER ERR
 
-        row_key_char = PyString_AsString(row_key);
+        row_key_char = PyBytes_AsString(row_key);
         // Is this check even necessary
-        // Docs seem to indicate it is not https://docs.python.org/2/c-api/string.html#c.PyString_AsString
+        // Docs seem to indicate it is not https://docs.python.org/2/c-api/string.html#c.PyBytes_AsString
         CHECK_BATCH_INNER_ERRNO(row_key_char, 12);
 
         if (strcmp(mutation_type_char, "put") == 0) {
@@ -2905,9 +2915,9 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
             if (timestamp) {
                 if (timestamp != Py_None) {
                     // Must be int
-                    CHECK_BATCH_INNER_ERRNO(PyInt_Check(timestamp), -1); // TODO BETTER ERR
+                    CHECK_BATCH_INNER_ERRNO(PyLong_Check(timestamp), -1); // TODO BETTER ERR
 
-                    timestamp_int = PyInt_AsSsize_t(timestamp);
+                    timestamp_int = PyLong_AsSize_t(timestamp);
                 }
             }
 
@@ -2952,9 +2962,9 @@ static PyObject *Table_batch(Table *self, PyObject *args) {
             if (timestamp) {
                 if (timestamp != Py_None) {
                     // Timestamp must be int
-                    CHECK_BATCH_INNER_ERRNO(PyInt_Check(timestamp), -1); // TODO BETTER ERRNO
+                    CHECK_BATCH_INNER_ERRNO(PyLong_Check(timestamp), -1); // TODO BETTER ERRNO
 
-                    timestamp_int = PyInt_AsSsize_t(timestamp);
+                    timestamp_int = PyLong_AsSize_t(timestamp);
                 }
             }
             if (is_wal) {
@@ -3132,8 +3142,7 @@ static PyMethodDef Table_methods[] = {
 
 // Declare the type components
 static PyTypeObject TableType = {
-   PyObject_HEAD_INIT(NULL)
-   0,                         /* ob_size */
+   PyVarObject_HEAD_INIT(NULL, 0)
    "pychbase._table",               /* tp_name */
    sizeof(Table),         /* tp_basicsize */
    0,                         /* tp_itemsize */
@@ -3211,7 +3220,7 @@ static PyObject *py_buildvalue_char(PyObject *self, PyObject *args) {
     }
 
     //printf("row_key ref count is %i\n", row_key->ob_refcnt);
-    //char *row_key_char = PyString_AsString(row_key);
+    //char *row_key_char = PyBytes_AsString(row_key);
     //printf("row_key ref count is now %i\n", row_key->ob_refcnt);
 
     PyObject *row_key_obj;
@@ -3331,10 +3340,10 @@ static PyObject *print_dict(PyObject *self, PyObject *args) {
     Py_ssize_t pos = 0;
 
     while (PyDict_Next(dict, &pos, &key, &value)) {
-        //PyString_AsString converts a PyObject to char * (and assumes it is actually a char * not some other data type)
+        //PyBytes_AsString converts a PyObject to char * (and assumes it is actually a char * not some other data type)
 
-        printf("key is %s\n", PyString_AsString(key));
-        printf("value is %s\n", PyString_AsString(value));
+        printf("key is %s\n", PyBytes_AsString(key));
+        printf("value is %s\n", PyBytes_AsString(value));
     }
 
     Py_RETURN_NONE;
@@ -3422,7 +3431,7 @@ static PyObject *print_list(PyObject *self, PyObject *args) {
     Py_ssize_t i;
     for (i = 0; i < PyList_Size(actions); i++) {
         value = PyList_GetItem(actions, i);
-        printf("value is %s\n", PyString_AsString(value));
+        printf("value is %s\n", PyBytes_AsString(value));
     }
 
     Py_RETURN_NONE;
@@ -3448,7 +3457,7 @@ static PyObject *print_list_t(PyObject *self, PyObject *args) {
     for (i = 0; i < PyList_Size(actions); i++) {
         tuple = PyList_GetItem(actions, i);
         printf("got tuple\n");
-        char *mutation_type = PyString_AsString(PyTuple_GetItem(tuple, 0));
+        char *mutation_type = PyBytes_AsString(PyTuple_GetItem(tuple, 0));
         printf("got mutation_type\n");
         printf("mutation type is %s\n", mutation_type);
         if (strcmp(mutation_type, "put") == 0) {
@@ -3486,7 +3495,7 @@ static PyObject *print_list_fast(PyObject *self, PyObject *args) {
 
     for (i = 0; i < len; i++) {
         value = PySequence_Fast_GET_ITEM(seq, i);
-        printf("Value is %s\n", PyString_AsString(value));
+        printf("Value is %s\n", PyBytes_AsString(value));
     }
 
     Py_RETURN_NONE;
@@ -3580,32 +3589,44 @@ static PyMethodDef SpamMethods[] = {
     {NULL, NULL, 0, NULL}
 };
 
+static struct PyModuleDef moduledef = {
+    PyModuleDef_HEAD_INIT,
+    "_pychbase",     /* m_name */
+    "This is a module",  /* m_doc */
+    -1,                  /* m_size */
+    SpamMethods,    /* m_methods */
+    NULL,                /* m_reload */
+    NULL,                /* m_traverse */
+    NULL,                /* m_clear */
+    NULL,                /* m_free */
+};
+
 #ifndef PyMODINIT_FUNC	/* declarations for DLL import/export */
 #define PyMODINIT_FUNC void
 #endif
 PyMODINIT_FUNC
-init_pychbase(void)
+PyInit__pychbase(void)
 {
     PyObject *m;
 
-    m = Py_InitModule("_pychbase", SpamMethods);
-    if (m == NULL) {
-        return;
-    }
+    m = PyModule_Create(&moduledef);
+
+    if (m == NULL)
+	return NULL;
 
     // Fill in some slots in the type and make it ready
     // I suppose I use this if I don't write my own new mthod?
     //FooType.tp_new = PyType_GenericNew;
     if (PyType_Ready(&FooType) < 0) {
-        return;
+        return NULL;
     }
 
     if (PyType_Ready(&ConnectionType) < 0) {
-        return;
+        return NULL;
     }
 
     if (PyType_Ready(&TableType) < 0) {
-        return;
+        return NULL;
     }
 
 
@@ -3630,10 +3651,12 @@ init_pychbase(void)
     HBaseError = PyErr_NewException("pychbase.HBaseError", NULL, NULL);
     Py_INCREF(HBaseError);
     PyModule_AddObject(m, "HBaseError", HBaseError);
+
+    return m;
 }
 
 int
-main(int argc, char *argv[])
+main(int argc, wchar_t *argv[])
 {
 
     Py_SetProgramName(argv[0]);
@@ -3642,5 +3665,5 @@ main(int argc, char *argv[])
     Py_Initialize();
 
 
-    init_pychbase();
+    PyInit__pychbase();
 }
