@@ -19,7 +19,8 @@ class Connection(object):
             with open('/opt/mapr/conf/mapr-clusters.conf') as f:
                 return Connection._extract_mapr_cldbs(f)
         except IOError:
-            raise ValueError("No zookeeper provided and could not be found in /opt/mapr/conf/mapr-clusters.conf")
+            raise ValueError('No zookeeper provided and could not be found '
+                             'in /opt/mapr/conf/mapr-clusters.conf')
 
         # TODO add these for Cloudera and Horton works
 
@@ -27,7 +28,7 @@ class Connection(object):
     def _extract_mapr_cldbs(f):
         first_line = f.readline()
         statements = first_line.split()
-        return ','.join(zookeeper for zookeeper in statements if ':' in zookeeper)
+        return ','.join(zookeeper for zookeeper in statements if ':' in zookeeper).encode()
 
     def table(self, table_name, use_prefix=True):
         # Todo use_prefix is not used
@@ -68,9 +69,7 @@ class Connection(object):
         raise NotImplementedError
 
 
-
-
-class Table(object):
+class Table:
     def __init__(self, connection, table_name):
         self.connection = connection
         self.table_name = table_name
@@ -205,7 +204,8 @@ class Batch(object):
             if not isinstance(timestamp, int):
                 raise TypeError("timestamp must be int")
 
-        self._actions.append(('put', row, data, timestamp, is_wal)) # Probably insert timestamp and wal here
+        # Probably insert timestamp and wal here
+        self._actions.append(('put', row, data, timestamp, is_wal))
         self._check_send()
 
     def delete(self, row, columns=None, wal=None, **kwargs):
@@ -222,7 +222,8 @@ class Batch(object):
             if not isinstance(timestamp, int):
                 raise TypeError("timestamp must be int")
 
-        self._actions.append(('delete', row, columns, timestamp, is_wal)) # Probably insert timestamp and wal here
+        # Probably insert timestamp and wal here
+        self._actions.append(('delete', row, columns, timestamp, is_wal))
         self._check_send()
 
     def _check_send(self):

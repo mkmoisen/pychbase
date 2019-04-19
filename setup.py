@@ -6,8 +6,9 @@ import sys
 
 
 is_fatal = False
-'/usr/lib/jvm/jre-1.7.0/lib/amd64/server/'
+
 # Both MapR and non-MapR environments require the libjvm.so file
+# '/usr/lib/jvm/jre-1.8.0/lib/amd64/server/'
 libjvm_dir = os.environ.get('PYCHBASE_LIBJVM_DIR', None)
 if libjvm_dir is None:
     sys.stderr.write('WARNING: $PYCHBASE_LIBJVM_DIR not set, trying $JAVA_HOME...\n')
@@ -106,6 +107,7 @@ here = path.abspath(path.dirname(__file__))
 long_description = 'A Python wrapper for the libhbase C API to HBase'
 try:
     import requests
+
     def read_md(file_name):
         try:
             with open(file_name, 'r') as f:
@@ -120,7 +122,7 @@ try:
                 raise Exception(r.text)
             return r.text
         except Exception as ex:
-            print ex
+            print(ex)
             return open(file_name, 'r').read()
 except ImportError:
     def read_md(file_name):
@@ -132,7 +134,6 @@ except ImportError:
             return long_description
 
 
-
 module1 = Extension('pychbase._pychbase',
                     sources=['pychbase.cc'],
                     include_dirs=include_dirs,
@@ -141,7 +142,7 @@ module1 = Extension('pychbase._pychbase',
                     define_macros=define_macros)
 
 setup(name='pychbase',
-      version='0.1.8',
+      version='0.2.0',
       description=long_description,
       long_description=read_md('README.md'),
       url='https://github.com/mkmoisen/pychbase',
@@ -153,7 +154,7 @@ setup(name='pychbase',
           'Development Status :: 3 - Alpha',
           'Intended Audience :: Developers',
           'License :: OSI Approved :: MIT License',
-          'Programming Language :: Python :: 2.7',
+          'Programming Language :: Python :: 3.7',
           'Programming Language :: Python :: Implementation :: CPython',
           'Natural Language :: English',
           'Operating System :: POSIX :: Linux',
